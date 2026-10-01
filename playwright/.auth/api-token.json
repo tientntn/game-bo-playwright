@@ -1,0 +1,7 @@
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6InRpZW5hZG1pbiIsIm5hbWUiOiJ0aWVuYWRtaW4iLCJpZCI6IjIyNSIsInV1aWQiOiI3NjhkOTRhYy02ZWZhLTQwMGMtYjQwZS01ZGMyOTNkNmZjOGUiLCJuYmYiOjE3ODY1MjM5NTEsImV4cCI6MTc4NjUyNzU1MSwiaWF0IjoxNzg2NTIzOTUxfQ.yQWWG29jL_bvwmMBgyogOhcNTtEEc1EpmxcNVdaIXWQ",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1bmlxdWVfbmFtZSI6InRpZW5hZG1pbiIsIm5iZiI6MTc4NjUyMzk1MSwiZXhwIjoxNzg2NjEwMzUxLCJpYXQiOjE3ODY1MjM5NTF9.L9csFB1_a-vVGEbZi_cvhLFapKpIQSQHO2V5rKxeLuY",
+  "userId": 225,
+  "sasEntityId": 1,
+  "sasEntityHierarchyId": 1
+}

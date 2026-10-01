@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "test:api": "playwright test --project=api --workers=1",
+    "test:ui": "playwright test --project=setup --project=chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  },
+  "dependencies": {
+    "date-fns": "^4.4.0",
+    "dotenv": "^17.4.2"
+  }
+}
