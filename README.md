@@ -7,16 +7,14 @@ npm install --save-dev @playwright/test --legacy-peer-deps
 
 npx playwright install
 
-//TEST BO
+npx playwright test --ui
 
-1. Login to https://dev-bo.royaledge.io/
-2. F12, copy all Local storage and past to file: playwright/.auth/session.txt
-3. npx playwright test --ui
+// authentication:
+Login to https://dev-bo.royaledge.io/
+F12, copy all Local storage and past to file: playwright/.auth/session.txt
 
 // API tests (tests/api) - test cho AlizeGames.BO.API (D:\Net\bo_backend\AlizeGames.BO.API)
-
-1. config .env:
-   API_BASE_URL, API_LOGIN_CODE, API_USERNAME, API_PASSWORD
+// Cấu hình tài khoản/base URL trong .env: API_BASE_URL, API_LOGIN_CODE, API_USERNAME, API_PASSWORD
 
 npm run test:api
 //Chạy 1 file

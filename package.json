@@ -4,7 +4,7 @@
     "test:ui": "playwright test --project=setup --project=chromium"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.63.0"
   },
   "dependencies": {
     "date-fns": "^4.4.0",

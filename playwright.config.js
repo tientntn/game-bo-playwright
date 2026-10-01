@@ -47,9 +47,9 @@ module.exports = defineConfig({
   // Thêm response-reporter.js bên cạnh "list" mặc định - reporter này in ra terminal
   // toàn bộ request/response của các lần gọi apiPost() khi 1 test tests/api/* fail,
   // để dễ kiểm tra lỗi API mà không cần mở HTML report (xem tests/api/helpers/api-client.js).
-  // reporter: [["list"], ["./tests/api/helpers/response-reporter.js"]],
+  reporter: [["list"], ["./tests/api/helpers/response-reporter.js"]],
   use: {
-    baseURL: `https://${boDomain}/`,
+    baseURL: "https://dev-bo.royaledge.io/",
   },
   projects: [
     // 1. Dự án chuyên đi đăng nhập (Nếu bạn dùng file setup để xử lý logic khác)
@@ -68,18 +68,13 @@ module.exports = defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         storageState: {
-          // Bỏ các key cache icon (iconify*) khỏi cookie: tổng ~11KB cookie làm header
-          // Cookie quá lớn khiến Cloudflare trả về "520: Web server is returning an unknown error".
-          // localStorage bên dưới vẫn nạp đầy đủ.
-          cookies: sessionEntries
-            .filter(({ name }) => !name.startsWith("iconify"))
-            .map(({ name, value }) => ({
-              name,
-              value,
-              domain: boDomain,
-              path: "/",
-              expires: Math.floor(Date.now() / 1000) + 3600 * 24,
-            })),
+          cookies: sessionEntries.map(({ name, value }) => ({
+            name,
+            value,
+            domain: boDomain,
+            path: "/",
+            expires: Math.floor(Date.now() / 1000) + 3600 * 24,
+          })),
           origins: [
             {
               origin: `https://${boDomain}`,
