@@ -53,6 +53,16 @@ const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const bulkBtns = (page) => page.locator("button.NextGen-button-more-action__update");
 const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
+// Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
+// Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
+const hoverTip = async (page, target, text) => {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await expect(tooltip(page)).toHaveCount(0, { timeout: 2000 });
+    await target.hover();
+    await expect(tooltip(page).filter({ hasText: text })).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15000 });
+};
 
 // Phần tử bao 1 filter (theo id của input bên trong)
 const filterEl = (page, id) =>
@@ -336,10 +346,9 @@ test.describe("Games > Game Categories", () => {
       for (const [i, c] of json.data.list.slice(0, 5).entries()) {
         const icons = rowAt(page, i).locator("td").last().locator("svg");
         await expect(icons).toHaveCount(2);
-        await icons.nth(0).hover();
-        await expect(tooltip(page).filter({ hasText: "Update" })).toBeVisible();
-        await icons.nth(1).hover(); // chỉ hover, KHÔNG click (sẽ đổi trạng thái category)
-        await expect(tooltip(page).filter({ hasText: exact(c.status === 1 ? "Deactivate" : "Activate") })).toBeVisible();
+        await hoverTip(page, icons.nth(0), "Update");
+        // chỉ hover, KHÔNG click (sẽ đổi trạng thái category)
+        await hoverTip(page, icons.nth(1), exact(c.status === 1 ? "Deactivate" : "Activate"));
       }
     });
   });
@@ -458,7 +467,7 @@ test.describe("Games > Game Categories", () => {
   test.describe("Sắp xếp", () => {
     const th = (page, column) => page.locator(".ant-table-thead th", { hasText: exact(column) });
 
-    // LỖI BACKEND (khám phá bằng MCP, chờ xác nhận): API game_category/list với sortBy=id, sortDirection=asc vẫn trả dữ liệu
+    // LỖI BACKEND ĐÃ XÁC NHẬN: API game_category/list với sortBy=id, sortDirection=asc vẫn trả dữ liệu
     // giảm dần; sortBy=effectiveTurnoverRate (asc / desc) không sắp xếp gì (luôn trả theo id giảm dần).
     // Các test sort 2 cột này kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi backend sửa.
     test("Sort cột ID: mặc định giảm dần, bấm lần lượt -> tăng dần -> giảm dần", async ({ page }) => {
@@ -558,10 +567,8 @@ test.describe("Games > Game Categories", () => {
     test("Tooltip của 2 nút thao tác hàng loạt", async ({ page }) => {
       await ensureData(page, test);
       await rowAt(page, 0).locator('input[type="checkbox"]').check();
-      await bulkBtns(page).nth(0).hover();
-      await expect(tooltip(page).filter({ hasText: "Bulk Activate" })).toBeVisible();
-      await bulkBtns(page).nth(1).hover();
-      await expect(tooltip(page).filter({ hasText: "Bulk Deactivate" })).toBeVisible();
+      await hoverTip(page, bulkBtns(page).nth(0), "Bulk Activate");
+      await hoverTip(page, bulkBtns(page).nth(1), "Bulk Deactivate");
     });
 
     for (const [i, action] of ["Activate", "Deactivate"].entries()) {

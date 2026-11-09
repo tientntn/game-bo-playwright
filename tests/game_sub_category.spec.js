@@ -404,8 +404,14 @@ test.describe("Games > Game Sub Categories", () => {
       test.skip(n === 0, "Không có dữ liệu");
       for (let i = 0; i < n; i++) {
         await expect(rowAt(page, i).locator("td").last().locator("svg")).toHaveCount(1);
-        await editIcon(page, i).hover();
-        await expect(tooltip(page).filter({ hasText: "Update" })).toBeVisible();
+        // Tooltip antd mở / đóng có độ trễ: tooltip dòng trước còn đang mờ dần thì sẽ có 2 tooltip cùng lúc
+        // (strict mode violation). Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi hiện.
+        await expect(async () => {
+          await page.mouse.move(0, 0);
+          await expect(tooltip(page)).toHaveCount(0, { timeout: 2000 });
+          await editIcon(page, i).hover();
+          await expect(tooltip(page).filter({ hasText: "Update" })).toBeVisible({ timeout: 2000 });
+        }).toPass({ timeout: 15000 });
       }
     });
   });
@@ -683,7 +689,7 @@ test.describe("Games > Game Sub Categories", () => {
   test.describe("Sắp xếp", () => {
     const th = (page, column) => page.locator(".ant-table-thead th", { hasText: exact(column) });
 
-    // LỖI BACKEND (khám phá bằng MCP, chờ xác nhận): API game_sub_category/list với sortBy=id, sortDirection=asc vẫn trả dữ liệu
+    // LỖI BACKEND ĐÃ XÁC NHẬN: API game_sub_category/list với sortBy=id, sortDirection=asc vẫn trả dữ liệu
     // giảm dần (id 64, 63, 62...). Test này kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi backend sửa.
     test("Sort cột ID: mặc định giảm dần, bấm lần lượt -> tăng dần -> giảm dần", async ({ page }) => {
       test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu để kiểm tra thứ tự");

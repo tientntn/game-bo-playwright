@@ -30,6 +30,16 @@ const isView = (r) => isPost(r, "/game/view");
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
+// Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
+// Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
+const hoverTip = async (page, target, text) => {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await expect(tooltip(page)).toHaveCount(0, { timeout: 2000 });
+    await target.hover();
+    await expect(tooltip(page).filter({ hasText: text })).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15000 });
+};
 const nextBtn = (page) => page.getByRole("button", { name: "Next", exact: true });
 const prevBtn = (page) => page.getByRole("button", { name: "Previous", exact: true });
 const cancelBtn = (page) => page.getByRole("button", { name: "Cancel", exact: true });
@@ -384,10 +394,8 @@ test.describe("Games > Update Game", () => {
     });
 
     test("Rê chuột vào icon ở tiêu đề hiện tooltip Notify Update / Settings", async ({ page }) => {
-      await page.locator('svg[data-icon="tower-broadcast"]').hover();
-      await expect(tooltip(page).filter({ hasText: "Notify Update" })).toBeVisible();
-      await page.locator('svg[data-icon="setting"]').hover();
-      await expect(tooltip(page).filter({ hasText: "Settings" })).toBeVisible();
+      await hoverTip(page, page.locator('svg[data-icon="tower-broadcast"]'), "Notify Update");
+      await hoverTip(page, page.locator('svg[data-icon="setting"]'), "Settings");
     });
 
     test("Icon Settings mở hộp thoại Game Settings, đóng bằng Cancel", async ({ page }) => {

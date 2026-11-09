@@ -122,6 +122,16 @@ const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const bulkBtns = (page) => page.locator("button.NextGen-button-more-action__update");
 const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
+// Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
+// Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
+const hoverTip = async (page, target, text) => {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await expect(tooltip(page)).toHaveCount(0, { timeout: 2000 });
+    await target.hover();
+    await expect(tooltip(page).filter({ hasText: text })).toBeVisible({ timeout: 2000 });
+  }).toPass({ timeout: 15000 });
+};
 
 // Phần tử bao 1 filter (theo id của input bên trong)
 const filterEl = (page, id) =>
@@ -469,10 +479,8 @@ test.describe("Games > Games", () => {
     test("Rê chuột vào icon hiện tooltip View / Update", async ({ page }) => {
       await ensureData(page, test);
       const icons = rowAt(page, 0).locator("td").last().locator("svg");
-      await icons.nth(0).hover();
-      await expect(tooltip(page).filter({ hasText: "View" })).toBeVisible();
-      await icons.nth(1).hover();
-      await expect(tooltip(page).filter({ hasText: "Update" })).toBeVisible();
+      await hoverTip(page, icons.nth(0), "View");
+      await hoverTip(page, icons.nth(1), "Update");
     });
   });
 
@@ -819,8 +827,7 @@ test.describe("Games > Games", () => {
       await ensureData(page, test);
       await checkRow(page, 0);
       for (const [i, b] of BULK.entries()) {
-        await bulkBtns(page).nth(i).hover();
-        await expect(tooltip(page).filter({ hasText: b.tip }), b.tip).toBeVisible();
+        await hoverTip(page, bulkBtns(page).nth(i), b.tip);
       }
     });
 
