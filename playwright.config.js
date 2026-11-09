@@ -39,6 +39,16 @@ function loadSessionEntries(filePath) {
 
 const sessionEntries = loadSessionEntries(sessionDumpPath);
 
+// Cookie gửi lên server KHÔNG được quá dài: session.txt có các key cache icon "iconify*"
+// (tổng vài KB). Nếu nhét hết vào cookie thì header Cookie vượt ~8KB và server trả lỗi
+// 4xx/5xx (vd 500). Token thực tế nằm ở localStorage (gửi qua header Bearer), nên chỉ
+// đưa các key nhỏ, cần thiết vào cookie; localStorage vẫn giữ nguyên đầy đủ.
+const MAX_COOKIE_VALUE_LENGTH = 600;
+const cookieEntries = sessionEntries.filter(
+  ({ name, value }) =>
+    !/^iconify/i.test(name) && value.length <= MAX_COOKIE_VALUE_LENGTH,
+);
+
 // console.log(
 //   `🚀 Đã đọc ${sessionEntries.length} key từ session.txt cho domain ${boDomain}`,
 // );
@@ -68,7 +78,7 @@ module.exports = defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         storageState: {
-          cookies: sessionEntries.map(({ name, value }) => ({
+          cookies: cookieEntries.map(({ name, value }) => ({
             name,
             value,
             domain: boDomain,
