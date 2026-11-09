@@ -175,22 +175,34 @@ async function fillFilter(page, id, value) {
   await page.locator(`#${id}`).fill(value);
 }
 
+// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
+// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
+// -> bấm vào sẽ XOÁ giá trị đang chọn.
+async function openDropdown(page, id) {
+  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
+}
+
 // Chọn option (theo title) của filter dạng dropdown, rồi đóng dropdown.
 // Gõ title vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị.
 async function selectOption(page, id, title) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   await page.keyboard.type(title);
   await page
     .locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option")
     .and(page.locator(`[title="${title}"]`))
     .first()
     .click();
-  await page.keyboard.press("Escape");
+  // Dropdown chọn nhiều không tự đóng và Esc cũng không đóng được -> click ra ngoài.
+  // (Nếu để mở, lần click tiếp theo vào ô sẽ làm mất giá trị đang chọn)
+  await pageTitle(page).click();
+  await expect(
+    page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option"),
+  ).toHaveCount(0);
 }
 
 // Đọc toàn bộ option đang có của 1 dropdown
 async function dropdownOptions(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   const opts = page.locator(
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option",
   );

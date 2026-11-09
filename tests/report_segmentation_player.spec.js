@@ -186,21 +186,33 @@ async function openPage(page) {
   await expect(filterEl(page, "currencyId")).toBeVisible();
 }
 
+// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
+// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
+// (vị trí chip còn đổi theo lúc antd đo lại) -> bấm vào sẽ XOÁ giá trị đang chọn.
+async function openDropdown(page, id) {
+  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
+}
+
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
 async function selectOption(page, id, title, matcher = exact(title, "i")) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   await page.keyboard.type(title);
   await page
     .locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option")
     .filter({ hasText: matcher })
     .first()
     .click();
-  await page.keyboard.press("Escape");
+  // Dropdown chọn nhiều không tự đóng và Esc cũng không đóng được -> click ra ngoài.
+  // (Nếu để mở, lần click tiếp theo vào ô sẽ làm mất giá trị đang chọn)
+  await breadcrumb(page).click();
+  await expect(
+    page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option"),
+  ).toHaveCount(0);
 }
 
 // Đọc toàn bộ option đang có của 1 dropdown
 async function dropdownOptions(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   const opts = page.locator(
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option",
   );
@@ -219,6 +231,20 @@ const selectedTitles = (page, id) =>
   filterEl(page, id)
     .locator(".ant-select-selection-item[title]")
     .evaluateAll((els) => els.map((e) => e.getAttribute("title")));
+
+// Tổng số giá trị đang chọn của 1 filter chọn nhiều giá trị. Khi chọn nhiều, ô filter chỉ hiện 1 chip và gom phần còn lại
+// thành "+ N ..." (chip này không có title) nên phải cộng cả hai lại.
+async function selectedCount(page, id) {
+  // Bỏ qua các chip ẩn (aria-hidden) dùng để đo kích thước khi antd gom chip
+  const shown = await filterEl(page, id)
+    .locator('.ant-select-selection-overflow-item:not([aria-hidden="true"]) .ant-select-selection-item[title]')
+    .count();
+  const rest = await filterEl(page, id)
+    .locator(".ant-select-selection-overflow-item-rest")
+    .allInnerTexts();
+  const hidden = rest.reduce((sum, t) => sum + Number(t.match(/\+\s*(\d+)/)?.[1] ?? 0), 0);
+  return shown + hidden;
+}
 
 // Chọn preset ngày (Today / Yesterday / Last 7 Days ...) cho Settled Time
 async function pickDatePreset(page, preset) {
@@ -663,11 +689,16 @@ test.describe("Report > Player Segmentation", () => {
     });
 
     test("Agent cho phép chọn nhiều giá trị -> request gửi agentIds nhiều phần tử", async ({ page }) => {
-      await fillRequiredFilters(page);
+      // Đọc danh sách option TRƯỚC khi chọn (mở lại dropdown đã có giá trị sẽ làm mất giá trị đang chọn)
+      await pickDatePreset(page, "Last 90 Days");
+      await selectOption(page, "currencyId", CURRENCY);
       const options = await dropdownOptions(page, "agentIds");
       const other = options.find((o) => o !== AGENT);
+      await selectOption(page, "agentIds", AGENT);
       await selectOption(page, "agentIds", other);
-      expect((await selectedTitles(page, "agentIds")).sort()).toEqual([AGENT, other].sort());
+      // Ô filter chỉ hiện 1 chip, phần còn lại gom thành "+ N ..." nên đếm tổng số giá trị đã chọn
+      // antd đo lại chip bất đồng bộ sau khi chọn nên dùng poll thay vì đọc 1 lần
+      await expect.poll(() => selectedCount(page, "agentIds"), { timeout: 10_000 }).toBe(2);
 
       await openCustomize(page);
       await fillCustomize(page, DEFAULT_CUSTOM);

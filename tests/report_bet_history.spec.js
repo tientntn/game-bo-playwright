@@ -151,20 +151,31 @@ async function fillFilter(page, id, label, value) {
   await page.locator(`#${id}`).fill(value);
 }
 
+// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
+// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
+// -> bấm vào sẽ XOÁ giá trị đang chọn.
+async function openDropdown(page, id) {
+  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
+}
+
 // Chọn option (theo title) của filter dạng dropdown, rồi đóng dropdown
 async function selectOption(page, id, title) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   await page
     .locator(
       `.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option[title="${title}"]`,
     )
     .click();
-  await page.keyboard.press("Escape");
+  // Click ra ngoài để đóng dropdown (Esc không đóng được dropdown chọn nhiều; để mở thì lần click sau sẽ mất giá trị đang chọn)
+  await pageTitle(page).click();
+  await expect(
+    page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option"),
+  ).toHaveCount(0);
 }
 
 // Đọc toàn bộ option đang có của 1 dropdown
 async function dropdownOptions(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control").click();
+  await openDropdown(page, id);
   const opts = page.locator(
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option",
   );
@@ -172,7 +183,11 @@ async function dropdownOptions(page, id) {
   const titles = await opts.evaluateAll((els) =>
     els.map((e) => e.getAttribute("title")),
   );
-  await page.keyboard.press("Escape");
+  // Click ra ngoài để đóng dropdown (Esc không đóng được dropdown chọn nhiều; để mở thì lần click sau sẽ mất giá trị đang chọn)
+  await pageTitle(page).click();
+  await expect(
+    page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option"),
+  ).toHaveCount(0);
   return titles;
 }
 
@@ -483,7 +498,7 @@ test.describe("Report > Bet History", () => {
 
     test("Đổi Timezone gửi timezoneId mới", async ({ page }) => {
       const before = (await search(page)).body.filters.timezoneId;
-      await filterEl(page, "timezoneId").locator(".NextGen-filter-dropdown__control").click();
+      await openDropdown(page, "timezoneId");
       const opts = page.locator(
         ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option",
       );
