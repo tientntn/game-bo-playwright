@@ -546,9 +546,11 @@ test.describe("Games > Effective Turnover Exclusion", () => {
       await expect(page.getByText("There are no entries found").first()).toBeVisible();
     });
 
-    // Chỉ kiểm tra request UI gửi đi. Kết quả backend khi ids có từ 2 giá trị trở lên chưa được xác nhận
-    // (khám phá bằng MCP: API trả status=fail, messageCode=UNKNOWN_ERROR) nên KHÔNG assert response ở test này.
-    test("Code chọn nhiều giá trị: gửi đủ các id game đã chọn", async ({ page }) => {
+    // LỖI BACKEND ĐÃ XÁC NHẬN: lọc Code / Name với từ 2 game trở lên (request ids=[40,135] hoặc ids=[40,256]) bị
+    // backend trả status=fail, messageCode=UNKNOWN_ERROR (UI hiện toast "Unknown Error. Please contact your account manager.")
+    // thay vì danh sách các game đã chọn. Lọc 1 game thì bình thường. 2 test dưới kiểm tra đúng hành vi mong đợi
+    // nên sẽ FAIL cho tới khi backend sửa.
+    async function expectMultiGameFilter(page, id, pick) {
       const { json } = await search(page);
       test.skip(json.data.list.length < 2, "Cần ít nhất 2 game trong danh sách");
       const [a, b] = json.data.list;
@@ -556,26 +558,31 @@ test.describe("Games > Effective Turnover Exclusion", () => {
       const gb = await gameOf(b);
       test.skip(!ga || !gb, "Tên / code game bị trùng với game khác");
 
-      await selectOption(page, "code", ga.code);
-      await selectOption(page, "code", gb.code);
-      await expect.poll(() => selectedCount(page, "code")).toBe(2);
-      const { body } = await search(page);
+      await selectOption(page, id, pick(ga));
+      await selectOption(page, id, pick(gb));
+      await expect.poll(() => selectedCount(page, id)).toBe(2);
+      const { body, status, json: res } = await search(page);
+      // UI gửi đủ id của các game đã chọn
       expect([...body.filters.ids].sort((x, y) => x - y)).toEqual([a.gameId, b.gameId].sort((x, y) => x - y));
+      // Backend phải trả thành công và đúng tập game đã chọn
+      expect(status).toBe(200);
+      expect(res.status, `messageCode=${res.messageCode}`).toBe("success");
+      expect(res.messageCode).toBe("SUCCESS");
+      await expect(page.locator(".Toastify__toast").filter({ hasText: "Unknown Error" })).toHaveCount(0);
+      expect(res.data.list.map((x) => x.id).sort((x, y) => x - y)).toEqual([a.id, b.id].sort((x, y) => x - y));
+      expect(res.data.totalCount).toBe(2);
+      // UI hiển thị đúng 2 dòng
+      await expect(rows(page)).toHaveCount(2);
+      expect([...(await columnValues(page, "Game Code"))].sort()).toEqual([norm(a.gameCode), norm(b.gameCode)].sort());
+      await expect(summary(page)).toHaveText("Showing 1 - 2 of 2 records");
+    }
+
+    test("Code chọn nhiều giá trị: gửi đủ ids, backend trả đúng các game đã chọn (LỖI BACKEND ĐÃ XÁC NHẬN)", async ({ page }) => {
+      await expectMultiGameFilter(page, "code", (g) => g.code);
     });
 
-    test("Name chọn nhiều giá trị: gửi đủ các id game đã chọn", async ({ page }) => {
-      const { json } = await search(page);
-      test.skip(json.data.list.length < 2, "Cần ít nhất 2 game trong danh sách");
-      const [a, b] = json.data.list;
-      const ga = await gameOf(a);
-      const gb = await gameOf(b);
-      test.skip(!ga || !gb, "Tên / code game bị trùng với game khác");
-
-      await selectOption(page, "name", ga.label);
-      await selectOption(page, "name", gb.label);
-      await expect.poll(() => selectedCount(page, "name")).toBe(2);
-      const { body } = await search(page);
-      expect([...body.filters.ids].sort((x, y) => x - y)).toEqual([a.gameId, b.gameId].sort((x, y) => x - y));
+    test("Name chọn nhiều giá trị: gửi đủ ids, backend trả đúng các game đã chọn (LỖI BACKEND ĐÃ XÁC NHẬN)", async ({ page }) => {
+      await expectMultiGameFilter(page, "name", (g) => g.label);
     });
 
     test("Game chưa nằm trong danh sách loại trừ: lọc theo Code không có kết quả", async ({ page }) => {
