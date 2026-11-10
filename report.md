@@ -1,6 +1,6 @@
 # Báo cáo các file đã làm – UI test BO (dev-bo.royaledge.io)
 
-Cập nhật: 09/11/2026
+Cập nhật: 10/11/2026
 
 ## 1. File test (thư mục `tests/`)
 
@@ -21,6 +21,7 @@ Cập nhật: 09/11/2026
 | `game_recommendation_group.spec.js` | Game Recommendation > Recommendation Group (`/game-recommendation/recommendation-group`) | 73 | Filter Group Name / Game Name, chip game, phân trang, sort, hộp thoại Add / Update / Delete (không bấm Submit / Delete xác nhận), Manage Columns, ghi nhớ filter và page size |
 | `game_denom.spec.js` | Games > Denominations (`/game/denom`) | 71 | Tab Denom Type (Slot / Mini / Crash / Card) và Game Sub Category, filter Currency / Name, phân trang, sort 3 cột, hộp thoại Upload (không bấm Confirm), màn hình chi tiết chỉ đọc, Manage Columns, ghi nhớ tab / sub category / filter / page size / sort |
 | `game_effective_turnover_exclusion.spec.js` | Games > Effective Turnover Exclusion (`/game/effective-turnover-exclusion`) | 73 | Filter Code / Name / Game Category (chọn nhiều), phân trang, sort Game Name, chọn dòng và Bulk Delete (chỉ mở hộp thoại, không bấm Delete xác nhận), hộp thoại Add New Exclusion và Upload CSV (không bấm Submit), Manage Columns, Export, ghi nhớ filter / sort / page size |
+| `master_agent_entity.spec.js` | Master Agent > Entity (`/master-agent/entity`) | 104 | 5 filter (House / Master Agent / Game Category / Currency chọn nhiều, Status chọn 1), dropdown Master Agent phụ thuộc House, bảng 9 cột, phân trang, sort 5 cột, chọn dòng + Activate / Deactivate hàng loạt (chỉ mở hộp thoại), menu "..." (Activate / Deactivate, Create Master Agent User), View / Update / Create (wizard 3 bước, validate bắt buộc, trùng tên / code), Manage Columns, Export, ghi nhớ filter. Request ghi bị chặn hoặc trả response giả, riêng describe cuối tạo 1 master agent `QA-AUTO-<timestamp>` thật rồi Deactivate (không có Delete nên bản ghi ở lại Inactive) |
 
 Mỗi spec đều kiểm tra: hiển thị mặc định, dữ liệu khớp response API, từng filter (kèm request body), Reset, ghi nhớ filter sau khi reload.
 Test không hard-code dữ liệu, giá trị lấy từ chính dòng đầu tiên của danh sách / báo cáo (riêng `report_segmentation_player.spec.js` dùng Currency / Agent mẫu,
@@ -39,3 +40,14 @@ Các màn hình có thao tác ghi dữ liệu (Save, Submit, Activate / Deactiva
 |---|---|
 | `report.md` | File này |
 | `.claude/agents/playwright.md` | Agent `playwright` để tự khám phá màn hình bằng Playwright MCP và viết file spec: quy trình, cấu trúc spec chuẩn, quy tắc an toàn dữ liệu, các điểm riêng của antd / NextGen đã gặp |
+
+## 4. Lỗi ứng dụng phát hiện / lưu ý
+
+### Master Agent > Entity (`master_agent_entity.spec.js`)
+
+Phát hiện lúc khám phá, **chưa kiểm chứng bằng chạy spec** (lần chạy đầu 104 test đều fail vì session hết hạn, bị chuyển về `/login`; cần dán lại localStorage vào `playwright/.auth/session.txt` rồi chạy lại).
+
+1. Hộp thoại Activate hàng loạt khi chọn nhiều dòng có tiêu đề "Activate 2 Master Agents" nhưng câu hỏi lại là "...deactivate these 2 Master Agents?" (sai hành động). Test bulk Activate nhiều dòng sẽ FAIL cho tới khi sửa.
+2. Hộp thoại Activate / Deactivate từng dòng dùng số nhiều "these <tên> Master Agents" dù chỉ 1 dòng. Test chỉ kiểm tra tên và hành động.
+3. Reset khi chưa có filter nào đang áp dụng không gọi lại API (giống lỗi đã ghi ở `game_denom.spec.js`). Test Reset đã Search với filter trước.
+4. Create qua UI (`masteragent/create` thật) chưa xác nhận vì chưa chạy; mới thấy payload và response giả lúc khám phá.
