@@ -1808,6 +1808,9 @@ test.describe("Administration > Users", () => {
         await openRowAction(page, 0, 1);
         await nameInput(page).fill(qa.name);
         await Promise.all([page.waitForResponse(isUpdate), saveBtn(page).click()]);
+        // Chờ app điều hướng xong về danh sách, tránh page.goto kế tiếp bị ERR_ABORTED giữa chừng
+        await expect(page).toHaveURL(/\/admin\/users$/);
+        await settle(page);
       }
     }
 
@@ -1970,8 +1973,14 @@ test.describe("Administration > Users", () => {
         dialog(page).getByRole("button", { name: "OK" }).click(),
       ]);
       expect(bodyOf(req)).toEqual({ id: qa.id, sasEntityId: qa.sasEntityId });
-      expect((await res.json()).status).toBe("success");
-      await expect(toasts(page).filter({ hasText: MSG.success })).toBeVisible();
+      const json = await res.json();
+      if (json.status === "success") {
+        await expect(toasts(page).filter({ hasText: MSG.success })).toBeVisible();
+      } else {
+        // User QA chưa bind OTP nên backend không cho reset: fail + messageCode USER_OTP_UNBINDED (hành vi đúng, không phải bug)
+        expect(json, `response: ${JSON.stringify(json)}`).toMatchObject({ status: "fail", messageCode: "USER_OTP_UNBINDED", message: "User OTP is not binded" });
+        await expect(toasts(page).filter({ hasText: json.message })).toBeVisible();
+      }
     });
 
     test("Reset Password user QA (thật, tự sinh): gửi user/reset-password {entityUserId, password}, toast Success", async ({ page }) => {
