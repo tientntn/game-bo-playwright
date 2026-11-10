@@ -547,8 +547,7 @@ test.describe("Games > Denominations", () => {
       expect(res.data.list.map((x) => x.currencyId).sort()).toEqual([a.currencyId, b.currencyId].sort());
     });
 
-    // Quan sát khi khám phá: filter Name khớp theo Default Denom Name (không khớp tên Currency, cũng không khớp các denom
-    // khác không phải mặc định của currency) - xem phần "cần xác nhận" ở báo cáo.
+    // ĐÚNG THIẾT KẾ (đã xác nhận): filter Name tìm theo tên denom (Default Denom Name), không tìm theo tên Currency.
     test("Lọc theo Name khớp một phần Default Denom Name, không phân biệt hoa/thường", async ({ page }) => {
       const { json } = await search(page);
       const r = json.data.list.find((x) => x.defaultDenom);
@@ -661,6 +660,31 @@ test.describe("Games > Denominations", () => {
       expect(body.filters).toEqual({});
       await expect(activeTab(page)).toHaveText("Mini game");
       await expect(checkedRadio(page)).toHaveText(norm(t.subs[1].name));
+    });
+
+    // LỖI BACKEND ĐÃ XÁC NHẬN (thực ra là lỗi UI): Reset khi đang ở trang 2 vẫn gửi page:2 (quan sát: page:2 + filters:{}),
+    // mong đợi phải quay về trang 1 như Search. Test này sẽ FAIL cho tới khi sửa.
+    // Reset chỉ gọi lại API khi đang có filter được áp dụng -> Search với filter (nhiều hơn 1 trang) rồi sang trang 2 trước khi Reset.
+    test("Reset khi đang ở trang 2 thì quay về trang 1 (gửi page:1, filters:{}) và hiển thị 'Showing 1 - ...'", async ({ page }) => {
+      const { json } = await search(page);
+      const r = json.data.list.find((x) => x.defaultDenom);
+      test.skip(!r, "Không có dòng nào có Default Denom Name");
+      await fillFilter(page, "name", norm(r.defaultDenom).slice(0, 3));
+      const filtered = await search(page);
+      test.skip(filtered.json.data.totalCount <= 10, "Filter chỉ có 1 trang");
+      const p2 = await reloadFull(page, () => page.locator(".ant-pagination-next").click(), isListWhere((b) => b.page === 2));
+      expect(p2.body.page).toBe(2);
+      await expect(summary(page)).toHaveText(/^Showing 11 - /);
+
+      const { body } = await reloadFull(
+        page,
+        () => resetBtn(page).click(),
+        isListWhere((b) => Object.keys(b.filters).length === 0),
+      );
+      expect(body.filters).toEqual({});
+      expect(body.page).toBe(1);
+      await expect(summary(page)).toHaveText(/^Showing 1 - /);
+      await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
     });
 
     test("Reset đưa cách sắp xếp về mặc định (Currencies tăng dần)", async ({ page }) => {
@@ -778,20 +802,31 @@ test.describe("Games > Denominations", () => {
   test.describe("Sắp xếp", () => {
     const th = (page, column) => page.locator(".ant-table-thead th", { hasText: exact(column) });
 
-    // Currencies là cột sort mặc định (tăng dần): bấm lần lượt chỉ đảo giữa giảm dần <-> tăng dần (không có trạng thái "bỏ sort")
-    test("Sort cột Currencies: mặc định tăng dần, bấm lần lượt -> giảm dần -> tăng dần -> giảm dần", async ({ page }) => {
+    // LỖI ĐÃ XÁC NHẬN: cột Currencies (cột sort mặc định) KHÔNG có trạng thái "bỏ sort" như 2 cột còn lại.
+    //  - Hành vi quan sát được: bấm lần lượt chỉ đảo desc <-> asc (desc, asc, desc...); sau lần bấm thứ 2 header Currencies
+    //    vẫn đang ở trạng thái tăng dần (aria-sort="ascending") và lần bấm thứ 3 lại gửi desc.
+    //  - Hành vi mong đợi (giống No. of Denom List / Default Denom Name: asc -> desc -> bỏ sort -> asc): chu kỳ 3 trạng thái
+    //    tăng dần (mặc định) -> giảm dần -> bỏ sort -> tăng dần. Vì Currencies là cột mặc định nên "bỏ sort" gửi lên API vẫn là
+    //    currency/asc (giống request mặc định), chỉ phân biệt được qua header: ở trạng thái bỏ sort header KHÔNG còn
+    //    aria-sort (không có icon sort nào sáng), như header của 2 cột còn lại khi đã về mặc định.
+    // Test này sẽ FAIL cho tới khi sửa.
+    test("Sort cột Currencies: tăng dần (mặc định) -> giảm dần -> bỏ sort (không còn icon sort) -> tăng dần", async ({ page }) => {
       test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu để kiểm tra thứ tự");
+      await expect(th(page, "Currencies")).toHaveAttribute("aria-sort", "ascending");
       // Cột chữ phụ thuộc collation của server nên chỉ kiểm tra request
       const desc = await reloadBy(page, () => th(page, "Currencies").click());
       expect(desc).toMatchObject({ sortBy: "currency", sortDirection: "desc" });
       await expect(th(page, "Currencies")).toHaveAttribute("aria-sort", "descending");
 
+      // Lần bấm thứ 2: bỏ sort -> request mặc định currency/asc nhưng header không còn trạng thái sort
+      const none = await reloadBy(page, () => th(page, "Currencies").click());
+      expect(none).toMatchObject({ sortBy: "currency", sortDirection: "asc" });
+      await expect(th(page, "Currencies")).not.toHaveAttribute("aria-sort", /.+/);
+
+      // Lần bấm thứ 3: quay lại tăng dần
       const asc = await reloadBy(page, () => th(page, "Currencies").click());
       expect(asc).toMatchObject({ sortBy: "currency", sortDirection: "asc" });
       await expect(th(page, "Currencies")).toHaveAttribute("aria-sort", "ascending");
-
-      const desc2 = await reloadBy(page, () => th(page, "Currencies").click());
-      expect(desc2).toMatchObject({ sortBy: "currency", sortDirection: "desc" });
     });
 
     for (const [column, sortBy] of Object.entries(SORTABLE).filter(([c]) => c !== "Currencies")) {
