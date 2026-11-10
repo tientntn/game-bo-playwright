@@ -9,6 +9,9 @@ npx playwright install
 
 npx playwright test --ui
 
+Test nhanh
+npx playwright test --workers=4 --project=setup --project=chromium
+
 // authentication:
 Login to https://dev-bo.royaledge.io/
 F12, copy all Local storage and past to file: playwright/.auth/session.txt
