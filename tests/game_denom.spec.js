@@ -662,10 +662,9 @@ test.describe("Games > Denominations", () => {
       await expect(checkedRadio(page)).toHaveText(norm(t.subs[1].name));
     });
 
-    // LỖI BACKEND ĐÃ XÁC NHẬN (thực ra là lỗi UI): Reset khi đang ở trang 2 vẫn gửi page:2 (quan sát: page:2 + filters:{}),
-    // mong đợi phải quay về trang 1 như Search. Test này sẽ FAIL cho tới khi sửa.
+    // HÀNH VI ĐÚNG (đã được user xác nhận): Reset khi đang ở trang 2 gửi page:2 + filters:{} (xoá filter, giữ nguyên trang đang xem).
     // Reset chỉ gọi lại API khi đang có filter được áp dụng -> Search với filter (nhiều hơn 1 trang) rồi sang trang 2 trước khi Reset.
-    test("Reset khi đang ở trang 2 thì quay về trang 1 (gửi page:1, filters:{}) và hiển thị 'Showing 1 - ...'", async ({ page }) => {
+    test("Reset khi đang ở trang 2: gửi page:2, filters:{} và vẫn hiển thị 'Showing 11 - ...'", async ({ page }) => {
       const { json } = await search(page);
       const r = json.data.list.find((x) => x.defaultDenom);
       test.skip(!r, "Không có dòng nào có Default Denom Name");
@@ -682,9 +681,9 @@ test.describe("Games > Denominations", () => {
         isListWhere((b) => Object.keys(b.filters).length === 0),
       );
       expect(body.filters).toEqual({});
-      expect(body.page).toBe(1);
-      await expect(summary(page)).toHaveText(/^Showing 1 - /);
-      await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+      expect(body.page).toBe(2);
+      await expect(summary(page)).toHaveText(/^Showing 11 - /);
+      await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
     });
 
     test("Reset đưa cách sắp xếp về mặc định (Currencies tăng dần)", async ({ page }) => {

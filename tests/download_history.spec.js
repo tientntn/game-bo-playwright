@@ -900,7 +900,8 @@ test.describe("Download History", () => {
         expect(bodies).toEqual([]);
       });
 
-      test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+      // HÀNH VI ĐÚNG (đã được user xác nhận): Reset xoá filter nhưng giữ nguyên trang đang xem (request list gửi page=2).
+      test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         await selectOption(page, "status", "Completed");
         const { json } = await search(page);
         test.skip(json.data.totalCount <= 10, "Completed chỉ có 1 trang");
@@ -909,8 +910,8 @@ test.describe("Download History", () => {
 
         const bodies = await resetBodies(page);
         expect(bodies.length, "Reset phải gọi lại API").toBeGreaterThan(0);
-        expect(bodies[bodies.length - 1]).toMatchObject({ page: 1, filters: {} });
-        await expect(summary(page)).toHaveText(/^Showing 1 - /);
+        expect(bodies[bodies.length - 1]).toMatchObject({ page: 2, filters: {} });
+        await expect(summary(page)).toHaveText(/^Showing 11 - /);
       });
     });
 

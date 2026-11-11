@@ -729,14 +729,15 @@ test.describe("Master Agents > Master Agents (danh sách)", () => {
       expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual(DEFAULT_BODY);
     });
 
-    test("Reset khi đang ở trang 2 thì quay về trang 1", async ({ page }) => {
+    // HÀNH VI ĐÚNG (đã được user xác nhận): Reset xoá filter nhưng GIỮ NGUYÊN trang đang xem, request list sau Reset vẫn là page=2.
+    test("Reset khi đang ở trang 2: xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
       await selectFilter(page, "status", "Active");
       const { json } = await search(page);
       test.skip(json.data.totalCount <= 10, "Chỉ có 1 trang");
       await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
       const bodies = await resetBodies(page);
-      expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 1, filters: {} });
-      await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+      expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 2, filters: {} });
+      await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
     });
   });
 

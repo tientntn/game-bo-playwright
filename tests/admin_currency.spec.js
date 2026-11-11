@@ -764,17 +764,16 @@ test.describe("Administration > Currency", () => {
         expect(body).toEqual(DEFAULT_BODY);
       });
 
-      // LỖI UI (cùng kiểu đã ghi ở các màn khác, CHƯA được user xác nhận cho màn này): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng request list
-      // vẫn gửi page=2. Test kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi sửa.
-      test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+      // HÀNH VI ĐÚNG (đã được user xác nhận): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng giữ nguyên trang đang xem (request list gửi page=2).
+      test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
         await selectOption(page, "status", "Active");
         const { json } = await search(page);
         test.skip(json.data.totalCount <= 10, "Filter Status = Active chỉ có 1 trang");
         await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const bodies = await resetBodies(page);
-        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual(DEFAULT_BODY);
-        await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual({ ...DEFAULT_BODY, page: 2 });
+        await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
       });
     });
 

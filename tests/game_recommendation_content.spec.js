@@ -499,9 +499,8 @@ test.describe("Game Recommendation > Recommendation Content", () => {
       expect(body).toEqual(DEFAULT_BODY);
     });
 
-    // NGHI LÀ BUG UI (khám phá bằng script, chưa được user xác nhận nên KHÔNG assert hành vi mong đợi):
-    // đang ở trang 2, không có filter, bấm Reset -> KHÔNG gửi request nào và vẫn ở trang 2 ("Showing 11 - 20 of N records");
-    // trong khi Search ở trang 2 thì về trang 1. Test chỉ kiểm tra phần chắc chắn: game đang chọn dở bị xoá khỏi ô filter.
+    // HÀNH VI ĐÚNG (đã được user xác nhận): đang ở trang 2, không có filter, bấm Reset -> KHÔNG gửi request nào và vẫn ở trang 2
+    // ("Showing 11 - 20 of N records"); còn Search ở trang 2 thì về trang 1. Game đang chọn dở bị xoá khỏi ô filter.
     test("Reset khi đang ở trang 2: xoá game đang chọn dở khỏi ô filter", async ({ page }) => {
       const { json } = await search(page);
       test.skip(json.data.totalCount <= 10, "Chỉ có 1 trang");
@@ -511,6 +510,7 @@ test.describe("Game Recommendation > Recommendation Content", () => {
       expect(await selectedGame(page)).toEqual([optionText(g)]);
       await resetBtn(page).click();
       await expect(filterEl(page, "gameId").locator(".ant-select-selection-item")).toHaveCount(0);
+      await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
     });
   });
 

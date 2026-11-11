@@ -884,17 +884,16 @@ test.describe("Players > Players (danh sách, chỉ đọc)", () => {
       expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual(defaultBody());
     });
 
-    // LỖI HỆ THỐNG ĐÃ XÁC NHẬN KHI CHẠY (giống agent_entity.spec.js): Reset xoá filter nhưng GIỮ NGUYÊN trang đang xem, request list sau Reset
-    // vẫn là page=2 (bảng vẫn ở trang 2) -> test này FAIL cho tới khi sửa. Đã ghi vào report.md.
-    test("Reset khi đang ở trang 2 thì quay về trang 1", async ({ page }) => {
+    // HÀNH VI ĐÚNG (đã được user xác nhận): Reset xoá filter nhưng GIỮ NGUYÊN trang đang xem, request list sau Reset vẫn là page=2.
+    test("Reset khi đang ở trang 2: xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
       const { json } = await search(page);
       test.skip(json.data.totalCount <= 10, "Chỉ có 1 trang");
       await selectFilter(page, "status", "Active");
       await search(page);
       await reloadBy(page, () => pageItem(page, 2).click());
       const bodies = await resetBodies(page);
-      expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 1, filters: F() });
-      await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+      expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 2, filters: F() });
+      await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
     });
   });
 

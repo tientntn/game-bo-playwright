@@ -724,17 +724,17 @@ test.describe("Administration > Permissions", () => {
         expect(body).toEqual(DEFAULT_BODY);
       });
 
-      // LỖI UI (đã tái hiện bằng script, CHƯA được user xác nhận): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng request list vẫn gửi page=2
-      // (thanh phân trang vẫn ở trang 2, "Showing 11 - 20 of 318 records"); Search thì về trang 1 đúng. Test kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi sửa.
-      test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+      // HÀNH VI ĐÚNG (đã được user xác nhận): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng giữ nguyên trang đang xem
+      // (request list gửi page=2, thanh phân trang vẫn ở trang 2); còn Search thì về trang 1.
+      test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
         await selectOption(page, "types", "EDIT");
         const { json } = await search(page);
         test.skip(json.data.totalCount <= 10, "Filter Type = EDIT chỉ có 1 trang");
         await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const bodies = await resetBodies(page);
-        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual(DEFAULT_BODY);
-        await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual({ ...DEFAULT_BODY, page: 2 });
+        await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
       });
     });
 

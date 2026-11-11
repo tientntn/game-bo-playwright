@@ -1093,9 +1093,8 @@ test.describe("Master Agent > Users", () => {
         await breadcrumb(page).click();
       });
 
-      // LỖI UI (quan sát khi khám phá, chưa được user xác nhận): Reset khi đang ở trang 2 mà filter đang mặc định có thể không về trang 1
-      // (xem house_entity). Ở đây chỉ kiểm tra trường hợp có filter đang áp dụng - Reset phải về trang 1.
-      test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+      // HÀNH VI ĐÚNG (đã được user xác nhận): Reset khi đang ở trang 2 xoá filter nhưng giữ nguyên trang đang xem (xem house_entity).
+      test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
         await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const { json: all } = await search(page);
@@ -1104,8 +1103,8 @@ test.describe("Master Agent > Users", () => {
         await selectOption(page, "houseIds", h.label);
         await reloadBy(page, () => searchBtn(page).click());
         const bodies = await resetBodies(page);
-        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 1, filters: { sasEntityHierarchyId: [3] } });
-        await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 2, filters: { sasEntityHierarchyId: [3] } });
+        await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
       });
     });
 

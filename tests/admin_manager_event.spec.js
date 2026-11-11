@@ -892,7 +892,8 @@ test.describe("Administration > Event Management", () => {
       await expect(rows(page).first()).toBeVisible();
     });
 
-    test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+    // HÀNH VI ĐÚNG (đã được user xác nhận): Reset khi đang ở trang 2 giữ nguyên trang đang xem.
+    test("Reset khi đang ở trang 2 (có filter): đặt lại filter nhưng giữ nguyên trang 2", async ({ page }) => {
       const total = await totalOf(page);
       test.skip(total <= 10, `Chỉ có ${total} bản ghi`);
       await pickTimezone(page, otherZone(await currentTimezone(page)));
@@ -902,8 +903,8 @@ test.describe("Administration > Event Management", () => {
 
       const bodies = await resetBodies(page);
       expect(bodies.length, "Reset phải gọi lại API").toBeGreaterThan(0);
-      expect(bodies[bodies.length - 1].page, "Reset phải về trang 1").toBe(1);
-      await expect(summary(page)).toHaveText(/^Showing 1 - 10 of /);
+      expect(bodies[bodies.length - 1].page, "Reset giữ nguyên trang 2").toBe(2);
+      await expect(summary(page)).toHaveText(/^Showing 11 - 20 of /);
     });
   });
 

@@ -678,10 +678,10 @@ test.describe("Administration > Roles", () => {
         expect(body).toEqual(DEFAULT_BODY);
       });
 
-      // LỖI UI (giống admin_users / player, CHƯA được user xác nhận): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng request list vẫn gửi page=2.
-      // Search thì về trang 1 đúng. Test kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi sửa.
+      // HÀNH VI ĐÚNG (đã được user xác nhận): bấm Reset khi đang ở trang 2 thì filter bị xoá nhưng giữ nguyên trang đang xem (request list gửi page=2).
+      // Search thì về trang 1.
       // Để có filter cho > 10 kết quả: chọn 11 Role Name (10 dòng đầu của trang 1 + dòng đầu trang 2 ở 20 dòng / trang) rồi đổi lại 10 dòng / trang.
-      test("Reset khi đang ở trang 2 (có filter) thì quay về trang 1", async ({ page }) => {
+      test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         test.setTimeout(240000);
         test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
         await pageSizeSelect(page).click();
@@ -695,8 +695,8 @@ test.describe("Administration > Roles", () => {
         test.skip(json.data.totalCount <= 10, "Filter không cho > 10 kết quả");
         await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const bodies = await resetBodies(page);
-        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual(DEFAULT_BODY);
-        await expect(page.locator(".ant-pagination-item-active")).toHaveText("1");
+        expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toEqual({ ...DEFAULT_BODY, page: 2 });
+        await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
       });
     });
 

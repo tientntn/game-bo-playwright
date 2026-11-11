@@ -677,7 +677,8 @@ test.describe("Houses > Houses (danh sách)", () => {
       expect(bodies.at(-1)).toEqual(DEFAULT_BODY);
     });
 
-    test("Reset khi đang ở trang 2: xoá filter nhưng giữ nguyên trang đang xem (quan sát thực tế)", async ({ page }) => {
+    // HÀNH VI ĐÚNG (đã được user xác nhận): Reset xoá filter nhưng giữ nguyên trang đang xem (request list gửi page=2).
+    test("Reset khi đang ở trang 2: xoá filter nhưng giữ nguyên trang đang xem", async ({ page }) => {
       test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
       // Reset chỉ gọi lại API khi filter đang áp dụng khác mặc định -> áp dụng filter Active (Search) rồi sang trang 2 rồi mới Reset
       await selectFilter(page, "status", "Active");
