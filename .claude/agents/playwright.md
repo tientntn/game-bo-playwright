@@ -89,7 +89,7 @@ MCP vẫn tốt hơn khi cần **tương tác từng bước** (dò modal / popo
 
 ### Session cho script
 
-Dùng `tests/helpers/session.js` - nó đọc `playwright/.auth/session.txt` rồi **bỏ key không dùng** (`iconify*`, `*_filter`, `*_page_size`),
+Dùng `tests/helpers/session.js` - nó đọc `playwright/.auth/session.txt` rồi **bỏ key không dùng** (`iconify*`, `*_filter`, `*_page_size`, `sorter__*`),
 không có cookie (token đi bằng header từ localStorage). Cùng 1 helper dùng được cho cả script lẫn spec:
 
 ```js
@@ -134,6 +134,22 @@ Cùng ràng buộc như MCP: 1 session/tài khoản, token ~1 giờ, **không t�
 - Export tạo bản ghi ở Download History (chấp nhận được, ghi chú trong header spec). Hộp thoại "already exist in download history" → bấm Download New chỉ khi cần kiểm tra luồng đó.
 - **Không hard-code dữ liệu** (player, game, id, code...): lấy từ dòng đầu của chính danh sách / response. Id màn hình con (vd `/game/update/{id}`) phải lấy bằng cách bấm icon từ màn hình danh sách, không gõ URL cứng.
 - Nếu không có dữ liệu phù hợp thì `test.skip(cond, "lý do")`, không để fail.
+
+### BẮT BUỘC dọn dữ liệu do agent tạo ra
+
+Khi đã Submit tạo dữ liệu (cả lúc khám phá bằng MCP / script lẫn trong spec), **xong việc và test xong các chức năng liên quan thì phải dọn bản ghi đã tạo** - không để rác trên dev:
+
+- Thứ tự ưu tiên cách dọn (chọn cách đầu tiên màn hình hỗ trợ):
+  1. **Delete** bản ghi (nếu có chức năng xoá).
+  2. Đổi trạng thái **Hidden** (ẩn) nếu màn hình có.
+  3. **Deactivate / Inactive** nếu không xoá hay ẩn được.
+  Nếu màn hình không có cách nào trong 3 cách trên thì ghi rõ trong header spec và mục "An toàn dữ liệu" của báo cáo: bản ghi nào còn sót và vì sao không dọn được.
+- **Chỉ dọn bản ghi do chính agent / test tạo** (nhận diện bằng tiền tố `QA-AUTO-` hoặc tiền tố QA của màn hình + dấu thời gian, có hàm kiểm tra kiểu `isQaGame(g)` trước khi xoá / đổi trạng thái). Tuyệt đối không dọn nhầm bản ghi có sẵn của team.
+- **Dọn SAU KHI test các chức năng liên quan xong** (xem chi tiết, sửa, tìm kiếm / lọc, trùng code...), không dọn sớm làm hỏng các test phụ thuộc. Dùng `test.describe.configure({ mode: "serial" })` và đặt bước dọn ở `afterAll` / `finally` để test fail giữa chừng vẫn dọn được.
+- Bản ghi tạo khi **khám phá bằng MCP / script** (không nằm trong spec) cũng phải dọn thủ công ngay sau khi khám phá xong.
+- Sau khi dọn phải **kiểm tra kết quả thật** (toast Success, bản ghi biến mất khỏi danh sách hoặc trạng thái đã đổi).
+- Nếu cả bước dọn lẫn bản ghi QA cũ còn sót thì dọn luôn các bản ghi QA cũ (đúng tiền tố) trước khi tạo mới.
+- Test submit tạo / sửa dữ liệu phải gắn cờ `RUN_FULL_TESTS` (`tests/helpers/flags.js`, chi tiết trong `RUN_FULL_TESTS.md`): `false` → skip, `true` → mới được tạo.
 
 ---
 
@@ -250,6 +266,7 @@ Ngắn gọn, nêu rõ test nào **chưa chạy**. Không nói "đã pass" nếu
 - ✅ Khi user dán lỗi: đọc đoạn test + tái hiện trên MCP rồi mới sửa (tìm nguyên nhân gốc, không chỉ tăng timeout)
 - ✅ Khi sửa 1 helper (vd `selectOption`) → áp dụng cho các spec dùng cùng helper
 - ✅ Cập nhật `report.md` khi user yêu cầu (chỉ liệt kê file đã làm)
+- ✅ Tạo dữ liệu xong + test xong chức năng liên quan thì dọn bản ghi đã tạo (Delete / Hidden / Deactivate) và báo cách dọn trong mục "An toàn dữ liệu"
 
 ### DON'T:
 - ❌ Sửa / xoá bản ghi có sẵn của team khi có thể tự tạo bản ghi `QA-AUTO-` để thao tác; để lại rác sau khi test tạo dữ liệu

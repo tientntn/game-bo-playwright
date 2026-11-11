@@ -6,12 +6,24 @@
 // Màn hình quản lý danh sách game. Test chạy với màn hình RỘNG (1920x1080) để hiện đủ cột và toàn bộ filter.
 //
 // Màn hình có nhiều thao tác GHI dữ liệu thật (Activate / Deactivate / Set to Maintenance / End Maintenance /
-// Notify Update, sửa Game Setting, tạo / sửa game). Test KHÔNG bấm xác nhận các thao tác này: chỉ mở hộp thoại,
-// kiểm tra nội dung rồi bấm Cancel / Close (không bao giờ bấm Deactivate, OK, Set to Maintenance...) và kiểm tra
-// không có request ghi dữ liệu nào được gửi đi.
+// Notify Update, sửa Game Setting, tạo / sửa game). QUY TẮC:
+//  - Thao tác trên game CÓ SẴN (của team): test KHÔNG bấm xác nhận. Chỉ mở hộp thoại, kiểm tra nội dung rồi bấm
+//    Cancel / Close (không bao giờ bấm Deactivate, OK, Set to Maintenance... trên game có sẵn) và kiểm tra không có
+//    request ghi dữ liệu nào được gửi đi.
+//  - Riêng describe "Tạo game": được phép Submit tạo game thật và thao tác (xem, Deactivate) trên CHÍNH game QA do
+//    test tạo ra (Name `QA-<timestamp>`, Code `QA_<timestamp>`). Màn hình không có chức năng xoá game nên dọn dẹp
+//    bằng cách Deactivate game QA đó (qua UI, có kiểm tra tên / code là QA trước khi bấm) - chạy ở test "Dọn dẹp"
+//    và lặp lại trong afterAll nếu test trước đó fail. Game QA ở lại với trạng thái Inactive.
+//  - CỜ RUN_FULL_TESTS (xem tests/helpers/flags.js, đặt trong .env, ghi đè nhanh bằng biến môi trường):
+//      RUN_FULL_TESTS=true  -> chạy cả các test Submit tạo game thật + dọn dẹp.
+//      RUN_FULL_TESTS=false -> (mặc định) các test đó bị SKIP, không gửi bất kỳ request ghi nào.
+//    Các test validate form tạo game (submit rỗng, Code trùng, Hit Rate...) không tạo dữ liệu nên luôn chạy.
 // Riêng test Export sẽ tạo thêm 1 bản ghi ở Download History.
-// Không hard-code dữ liệu (code, tên game...) - mọi giá trị lấy từ chính dòng đầu tiên của danh sách.
+// Không hard-code dữ liệu (code, tên game...) - mọi giá trị lấy từ chính dòng đầu tiên của danh sách; dữ liệu
+// tham chiếu khi tạo game (category, sub category, engine, currency + denom) lấy từ option / response API thật.
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
+const { buildStorageState } = require("./helpers/session");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -144,7 +156,7 @@ async function waitTableIdle(page) {
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
-  test.setTimeout(90000);
+  test.setTimeout(Math.max(90000, test.info().timeout)); // không làm ngắn timeout đã nới của test / hook dọn dẹp
   const firstLoad = page.waitForResponse(isList, { timeout: 60000 });
   firstLoad.catch(() => {}); // tránh unhandled rejection khi test kết thúc sớm
   await page.goto(URL);
@@ -288,7 +300,8 @@ const checkRow = (page, i) => rowAt(page, i).locator('input[type="checkbox"]').c
 // Ghi lại mọi request POST KHÔNG phải đọc dữ liệu để chắc chắn test không làm đổi dữ liệu thật
 function watchWrites(page) {
   const writes = [];
-  const READ = /\/(list|list\/v2|details|download|view)$|\/dropdown\/|\/user\/details$/;
+  const READ =
+    /\/(list|list\/v2|details|download|view|dropdown|by-currency-category)$|\/dropdown\/|\/validate\/|\/user\/details$/;
   page.on("request", (r) => {
     if (r.method() === "POST" && /boapi/.test(r.url()) && !READ.test(r.url())) writes.push(r.url());
   });
@@ -320,6 +333,264 @@ const findGame = (json, pred) => {
   const index = json.data.list.findIndex(pred);
   return index < 0 ? null : { index, game: json.data.list[index] };
 };
+
+// ---------------------------------------------------------------------------
+// Helpers cho trang tạo game (/game/create-game) - wizard 5 bước
+// ---------------------------------------------------------------------------
+const CREATE_STEPS = ["Basic Information", "Currency", "Agent Assignment", "Paytable", "Review & Submit"];
+const HIT_RATE_ERROR = "Please enter valid hit rate value greater than 0 and hit rate value less than 100";
+// Các mức Win Formula nhập vào hộp thoại (tên mức -> [min, max]; Ultra không có max)
+const WIN_TIERS = { Slim: [0, 10], Small: [10, 20], Medium: [20, 50], Big: [50, 100], Mega: [100, 500], Ultra: [500] };
+const isCreate = (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/create/v2");
+const isStatusUpdate = (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/update-status/v2");
+const isView = (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/view");
+const nextBtn = (page) => page.getByRole("button", { name: "Next", exact: true });
+const prevBtn = (page) => page.getByRole("button", { name: "Previous", exact: true });
+const cancelBtn = (page) => page.getByRole("button", { name: "Cancel", exact: true });
+const submitBtn = (page) => page.getByRole("button", { name: "Submit", exact: true });
+const toast = (page) => page.locator(".Toastify__toast");
+
+// Ô form theo nhãn (vd "Game Category") và các lỗi validate của ô đó
+const formItem = (page, label) =>
+  page
+    .locator(".ant-form-item")
+    .filter({ has: page.locator(".ant-form-item-label label", { hasText: exact(label) }) })
+    .first();
+const formErrors = (page, label) => formItem(page, label).locator(".ant-form-item-explain-error");
+
+// Bước đang active (1..5)
+async function activeStep(page) {
+  const items = await page
+    .locator(".ant-steps-item")
+    .evaluateAll((els) => els.map((e) => e.classList.contains("ant-steps-item-active")));
+  return items.findIndex(Boolean) + 1;
+}
+
+// Danh sách option đang mở của dropdown antd
+const openOptions = (page) =>
+  page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+
+// Click vào chữ "Create Game" ở breadcrumb để đóng dropdown (không click link "Games")
+const clickOutside = async (page) => {
+  await breadcrumb(page).getByText("Create Game").click();
+  await expect(openOptions(page)).toHaveCount(0);
+};
+
+// Từ danh sách /game bấm Add New -> trang tạo game
+async function startCreate(page) {
+  await addBtn(page).click();
+  await expect(page).toHaveURL(/\/game\/create-game$/);
+  await expect(breadcrumb(page)).toContainText("Create Game");
+  await expect(page.locator("#name")).toBeVisible();
+}
+
+// Chọn option thứ n của ô select 1 giá trị, trả về tên option đã chọn
+async function pickOption(page, label, n = 0) {
+  const f = formItem(page, label);
+  await f.locator(".ant-select-selector").click();
+  const opt = openOptions(page).nth(n);
+  await expect(opt).toBeVisible();
+  const title = (await opt.getAttribute("title")) ?? norm(await opt.innerText());
+  await opt.click();
+  await expect(f.locator(".ant-select-selection-item[title]")).toHaveAttribute("title", title);
+  // Chờ dropdown đóng hẳn (còn đang mờ dần thì lần mở dropdown kế tiếp sẽ lấy nhầm option của dropdown cũ)
+  await expect(openOptions(page)).toHaveCount(0);
+  return title;
+}
+
+// Chọn 1 option đầu tiên (không phải "Select All") của ô chọn nhiều, trả về tên option
+async function pickMulti(page, label) {
+  const f = formItem(page, label);
+  await f.locator(".ant-select-selector").click();
+  const opt = openOptions(page).filter({ hasNotText: /^\s*Select All\s*$/ }).first();
+  await expect(opt).toBeVisible();
+  const title = (await opt.getAttribute("title")) ?? norm(await opt.innerText());
+  await opt.click();
+  await clickOutside(page); // dropdown chọn nhiều không tự đóng
+  // Chip của ô chọn nhiều ở form tạo game không có class / title chuẩn của antd -> kiểm tra theo chữ trong ô
+  await expect(f.locator(".ant-select-selector")).toContainText(title);
+  return title;
+}
+
+// Mở hộp thoại Win Formula (bấm vào ô chỉ đọc) và nhập đủ các mức rồi Save
+async function fillWinFormula(page) {
+  await page.locator("#winFormula").click();
+  await expect(dialog(page)).toContainText("Win Formula");
+  for (const [tier, [min, max]] of Object.entries(WIN_TIERS)) {
+    await dialog(page).locator(`#wf${tier}Min`).fill(String(min));
+    if (max != null) await dialog(page).locator(`#wf${tier}Max`).fill(String(max));
+  }
+  await dialog(page).getByRole("button", { name: "Save", exact: true }).click();
+  await expect(dialog(page)).toBeHidden();
+  await expect(page.locator("#winFormula")).toHaveValue("View Details");
+}
+
+// Bước 1: điền Name / Code + các field bắt buộc (+ field tuỳ chọn nếu full). Ghi giá trị đã chọn vào qa.
+async function fillBasic(
+  page,
+  qa,
+  { name = qa.name ?? `QA-${Date.now()}`, code = qa.code ?? `QA_${Date.now()}`, optional = true } = {},
+) {
+  await page.locator("#name").fill(name);
+  await page.locator("#code").fill(code);
+  // Sub Category nạp lại theo Category đã chọn -> chờ response có gameCategoryIds trước khi mở dropdown
+  const subRes = page.waitForResponse(
+    (r) => reqOf(r).url().endsWith("/game/game_sub_category/list") && /"gameCategoryIds":\[\d/.test(reqOf(r).postData() || ""),
+  );
+  qa.category = await pickOption(page, "Game Category");
+  await subRes;
+  qa.subCategory = await pickOption(page, "Game Sub Category");
+  qa.engine = await pickOption(page, "Engine");
+  await fillWinFormula(page);
+  if (optional) {
+    await page.locator("#hitrate").fill(qa.hitRate);
+    qa.volatility = await pickOption(page, "Volatility");
+    qa.language = await pickMulti(page, "Language");
+  }
+}
+
+// Bước 1 -> 2. Trả về response của denomination/dropdown và dropdown/currency (dùng để chọn currency có denom)
+async function goToCurrencyStep(page) {
+  const denomRes = page.waitForResponse((r) => reqOf(r).url().endsWith("/denomination/dropdown"), { timeout: 30000 });
+  const curRes = page.waitForResponse((r) => reqOf(r).url().endsWith("/dropdown/currency"), { timeout: 30000 });
+  denomRes.catch(() => {});
+  curRes.catch(() => {});
+  await nextBtn(page).click();
+  await expect.poll(() => activeStep(page)).toBe(2);
+  return {
+    denoms: (await (await denomRes).json()).data ?? [],
+    currencies: (await (await curRes).json()).data ?? [],
+  };
+}
+
+// Bước 2: bấm Add New, tick currency (theo tên hiển thị) rồi Confirm
+async function addCurrency(page, label) {
+  await page.getByRole("button", { name: /Add New/ }).click();
+  await expect(dialog(page)).toContainText("Add new");
+  const row = dialog(page).locator("tr.ant-table-row").filter({ hasText: exact(label) });
+  await expect(row).toHaveCount(1);
+  await row.locator("input").check();
+  await dialog(page).getByRole("button", { name: /Confirm$/ }).click();
+  await expect(dialog(page)).toBeHidden();
+  await expect(rows(page)).toHaveCount(1);
+}
+
+// Bước 2: sau khi thêm currency có denom thì app tự chọn sẵn denom mặc định (hiện "<tên> (Default)").
+// Nếu chưa có denom nào được chọn thì chọn option đầu tiên. Trả về denom đã chọn (phần tử của denominationList).
+async function ensureDenom(page, denomList) {
+  const selected = rows(page).first().locator(".ant-select-selection-item[title]");
+  let title = await selected.getAttribute("title", { timeout: 3000 }).catch(() => null);
+  if (!title) {
+    await page
+      .locator("#currencyInfoList_0_denom")
+      .locator("xpath=ancestor::div[contains(@class,'ant-select-selector')]")
+      .click();
+    const opt = openOptions(page).first();
+    await expect(opt).toBeVisible();
+    await opt.click();
+    title = await selected.getAttribute("title");
+  }
+  const denom = denomList.find((d) => title === d.name || title === `${d.name} (Default)`);
+  expect(denom, `Denom đã chọn "${title}" không có trong response denomination/dropdown`).toBeTruthy();
+  return denom;
+}
+
+// Chọn currency + denom thật: lấy currency đầu tiên trong response denomination/dropdown có danh sách denom
+// (và có trong danh sách currency để biết tên hiển thị). Trả về null nếu server không trả denom nào.
+// (Quan sát: denomination/dropdown thỉnh thoảng trả mảng rỗng dù cùng sub category - khi đó không tạo game được)
+async function addCurrencyWithDenom(page, ctx) {
+  const labelOf = new Map(ctx.currencies.map((c) => [c.value, c.label]));
+  const pick = ctx.denoms.find((d) => d.denominationList?.length && labelOf.has(d.currencyId));
+  if (!pick) return null;
+  const label = labelOf.get(pick.currencyId);
+  await addCurrency(page, label);
+  const denom = await ensureDenom(page, pick.denominationList);
+  return { currency: label, currencyId: pick.currencyId, denom, denomName: denom.name };
+}
+
+// Đi tới bước n bằng nút Next (các bước 2 -> 3 -> 4 -> 5 sau khi đã hợp lệ)
+async function goToStep(page, n) {
+  for (let s = await activeStep(page); s < n; s++) {
+    await nextBtn(page).click();
+    await expect.poll(() => activeStep(page)).toBe(s + 1);
+  }
+}
+
+// Điền JSON vào hộp thoại soạn thảo (Paytable / Help Page) rồi OK
+async function fillJsonDialog(page, titlePart, obj) {
+  await expect(dialog(page)).toContainText(titlePart);
+  await dialog(page).locator("textarea").fill(JSON.stringify(obj));
+  await dialog(page).getByRole("button", { name: /OK$/ }).click();
+  await expect(dialog(page)).toBeHidden();
+}
+
+// Bước 4: thêm 1 paytable (Name + nội dung Paytable + Help Page). help = false để bỏ trống Help Page.
+async function addPaytable(page, qa, { help = true } = {}) {
+  await page.getByRole("button", { name: /Add New/ }).click();
+  await expect(rows(page)).toHaveCount(1);
+  qa.paytable = `PT_${qa.code}`;
+  await page.locator("#payTableInfoList_0_code").fill(qa.paytable);
+  const icons = rows(page).first().locator('svg[data-icon="pen-to-square"]');
+  await icons.nth(0).click();
+  await fillJsonDialog(page, "Paytable -", { BaseGame: { Name: "BaseGame", Cols: 5 } });
+  if (help) {
+    await icons.nth(1).click();
+    await fillJsonDialog(page, "Edit Help Page", { title: "QA help" });
+  }
+}
+
+// Đi từ trang danh sách tới bước Review & Submit với dữ liệu hợp lệ. Trả về thông tin currency / denom đã chọn,
+// hoặc null nếu server không trả denom nào (khi đó test nên skip).
+async function reachReview(page, qa, opts = {}) {
+  await startCreate(page);
+  await fillBasic(page, qa, opts);
+  const ctx = await goToCurrencyStep(page);
+  const cur = await addCurrencyWithDenom(page, ctx);
+  if (!cur) return null;
+  qa.currencyInfo = cur;
+  await goToStep(page, 4); // bước 3 (Agent Assignment) không bắt buộc gì
+  if (opts.paytable !== false) await addPaytable(page, qa);
+  await goToStep(page, 5);
+  await expect(submitBtn(page)).toBeVisible();
+  return cur;
+}
+
+// Chỉ thao tác trên game do chính test tạo: Name `QA-<số>` và Code `QA_<số>`
+const isQaGame = (g) => /^QA-\d+$/.test(g.name) && /^QA_\d+$/.test(g.code);
+
+// Mở danh sách, lọc theo Code (hoặc Name) của game QA. Trả về { json, found: { index, game } | null }
+async function findQaGame(page, qa, by = "code") {
+  await openPage(page);
+  await selectOption(page, by, by === "code" ? qa.code : qa.name);
+  const { body, json } = await search(page);
+  return { body, json, found: findGame(json, (g) => g.code === qa.code) };
+}
+
+// Deactivate game QA qua UI (menu "..." -> Deactivate -> xác nhận). Trả về true nếu đã bấm Deactivate.
+// Từ chối thao tác nếu game không phải game QA do test tạo.
+async function deactivateQaGame(page, qa) {
+  const { found } = await findQaGame(page, qa);
+  if (!found) return false;
+  expect(isQaGame(found.game), `Không phải game QA: ${found.game.name} / ${found.game.code}`).toBe(true);
+  if (found.game.status !== 1) return false;
+  // Menu "..." có thể bị đóng khi bảng render lại ngay sau khi tải -> mở lại tới khi bấm được Deactivate
+  await expect(async () => {
+    const menu = await openRowMenu(page, found.index);
+    await menu.getByText("Deactivate", { exact: true }).click({ timeout: 5000 });
+  }).toPass({ timeout: 40000 });
+  await expect(dialog(page)).toContainText(`Deactivate ${found.game.name}`);
+  const [req, res] = await Promise.all([
+    page.waitForRequest(isStatusUpdate),
+    page.waitForResponse(isStatusUpdate),
+    dialog(page).getByRole("button", { name: /Deactivate$/ }).click(),
+  ]);
+  const body = JSON.parse(req.postData());
+  expect(body.gameIds, "Chỉ được Deactivate đúng game QA").toEqual([found.game.id]);
+  expect(body.status).toBe(0);
+  expect((await res.json()).status).toBe("success");
+  await expect(dialog(page)).toBeHidden();
+  return { id: found.game.id, body };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -957,6 +1228,454 @@ test.describe("Games > Games", () => {
       await addBtn(page).click();
       await expect(page).toHaveURL(/\/game\/create-game$/);
       await expect(breadcrumb(page)).toContainText("Create Game");
+    });
+  });
+
+  // ===== 9b. Tạo game =====
+  // Trang /game/create-game: wizard 5 bước (Basic Information -> Currency -> Agent Assignment -> Paytable -> Review & Submit).
+  // Backend (quan sát khi khám phá): Name chỉ chấp nhận chữ + số và các ký tự . , - ' (KHÔNG có "_" và khoảng trắng) nhưng form không
+  // kiểm tra; Code 3-50 ký tự chữ + số + "_"; game phải có >= 1 paytable (form cho Next khi chưa có) kèm Help Page.
+  test.describe("Tạo game", () => {
+    // Giá trị QA dùng chung cho các test tạo game thật (mỗi worker 1 bộ giá trị)
+    const stamp = Date.now();
+    const qa = { name: `QA-${stamp}`, code: `QA_${stamp}`, hitRate: "12.5" };
+    // Mọi game QA thực sự được tạo ra (kể cả khi server vô tình chấp nhận dữ liệu sai) để dọn dẹp ở afterAll
+    const qaGames = [];
+
+    // ---------- Validate form: KHÔNG tạo dữ liệu, luôn chạy ----------
+    test.describe("Validate form tạo game (không ghi dữ liệu)", () => {
+      let writes;
+      test.beforeEach(async ({ page }) => {
+        writes = watchWrites(page);
+        await startCreate(page);
+      });
+      test.afterEach(async () => {
+        expect(writes, "Không được gửi request ghi dữ liệu").toEqual([]);
+      });
+
+      test("Có tiêu đề 'Games > Create Game', thanh 5 bước và 2 nút Cancel / Next", async ({ page }) => {
+        await expect(breadcrumb(page)).toContainText("Games");
+        await expect(breadcrumb(page)).toContainText("Create Game");
+        const steps = (await page.locator(".ant-steps-item").allInnerTexts()).map(norm);
+        expect(steps).toHaveLength(5);
+        CREATE_STEPS.forEach((name, i) => expect(steps[i]).toContain(name));
+        expect(await activeStep(page)).toBe(1);
+        await expect(cancelBtn(page)).toBeVisible();
+        await expect(nextBtn(page)).toBeVisible();
+        await expect(prevBtn(page)).toHaveCount(0);
+      });
+
+      test("Có đủ các trường, trường bắt buộc có dấu *, Status mặc định Active", async ({ page }) => {
+        for (const label of [
+          "Name",
+          "Code",
+          "Game Category",
+          "Game Sub Category",
+          "Engine",
+          "Win Formula",
+          "Hit Rate",
+          "Volatility",
+          "Language",
+          "Features",
+          "Themes",
+          "Labels",
+          "Tags",
+          "Status",
+          "Landscape Image",
+          "Square Image",
+        ]) {
+          await expect(formItem(page, label), `thiếu trường ${label}`).toBeVisible();
+        }
+        for (const label of ["Name", "Code", "Game Category", "Game Sub Category", "Engine", "Win Formula", "Status"]) {
+          await expect(formItem(page, label).locator(".ant-form-item-required"), `${label} phải bắt buộc`).toHaveCount(1);
+        }
+        for (const label of ["Hit Rate", "Volatility", "Language", "Features", "Themes", "Labels", "Tags"]) {
+          await expect(formItem(page, label).locator(".ant-form-item-required"), `${label} không bắt buộc`).toHaveCount(0);
+        }
+        await expect(page.locator('input[type="radio"][value="1"]')).toBeChecked();
+        await expect(page.locator('input[type="radio"][value="0"]')).not.toBeChecked();
+        // Code và Engine sửa được khi tạo mới (khác màn hình Update)
+        await expect(page.locator("#code")).toBeEnabled();
+        await expect(page.locator("#engine")).toBeEnabled();
+      });
+
+      test("Submit rỗng (Next khi để trống): báo lỗi từng trường bắt buộc và ở lại bước 1", async ({ page }) => {
+        await nextBtn(page).click();
+        await expect(formErrors(page, "Name")).toHaveText("Please enter Name");
+        await expect(formErrors(page, "Code")).toHaveText("Please enter Code");
+        await expect(formErrors(page, "Game Category")).toHaveText("Please enter Game Category");
+        await expect(formErrors(page, "Game Sub Category")).toHaveText("Please enter Game Sub Category");
+        await expect(formErrors(page, "Engine")).toHaveText("Please enter Engine");
+        await expect(formErrors(page, "Win Formula")).toHaveText("This field is required");
+        // Các trường không bắt buộc không báo lỗi
+        for (const label of ["Hit Rate", "Volatility", "Language", "Features", "Themes", "Labels", "Tags"]) {
+          await expect(formErrors(page, label), label).toHaveCount(0);
+        }
+        expect(await activeStep(page)).toBe(1);
+      });
+
+      test("Mỗi trường bắt buộc để trống riêng lẻ vẫn chặn Next (điền các trường còn lại)", async ({ page }) => {
+        const filled = {};
+        await fillBasic(page, filled, { optional: false });
+        // Xoá Name -> lỗi Name, không sang được bước 2
+        await page.locator("#name").fill("");
+        await nextBtn(page).click();
+        await expect(formErrors(page, "Name")).toHaveText("Please enter Name");
+        expect(await activeStep(page)).toBe(1);
+        await page.locator("#name").fill(`QA-${stamp}`);
+        // Xoá Code -> lỗi Code
+        await page.locator("#code").fill("");
+        await nextBtn(page).click();
+        // Khi xoá Code đã nhập, ô báo cả "Please enter Code" lẫn lỗi định dạng "entity code must be alphanumeric..."
+        await expect(formErrors(page, "Code").filter({ hasText: "Please enter Code" })).toHaveCount(1);
+        expect(await activeStep(page)).toBe(1);
+      });
+
+      test("Win Formula: Save khi chưa nhập báo 'This field is required' ở cả 11 ô, nhập đủ rồi Save thì ô hiện View Details", async ({
+        page,
+      }) => {
+        await page.locator("#winFormula").click();
+        await expect(dialog(page)).toContainText("Win Formula");
+        await expect(dialog(page).locator("input[id^='wf']")).toHaveCount(11); // 5 mức có min + max, Ultra chỉ có min
+        await dialog(page).getByRole("button", { name: "Save", exact: true }).click();
+        await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(11);
+        await expect(dialog(page)).toBeVisible(); // không đóng khi còn lỗi
+        for (const [tier, [min, max]] of Object.entries(WIN_TIERS)) {
+          await dialog(page).locator(`#wf${tier}Min`).fill(String(min));
+          if (max != null) await dialog(page).locator(`#wf${tier}Max`).fill(String(max));
+        }
+        await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(0);
+        await dialog(page).getByRole("button", { name: "Save", exact: true }).click();
+        await expect(dialog(page)).toBeHidden();
+        await expect(page.locator("#winFormula")).toHaveValue("View Details");
+        await expect(formErrors(page, "Win Formula")).toHaveCount(0);
+      });
+
+      test("Code: chỉ chữ + số + '_' (khoảng trắng, '-' bị từ chối), 'A_b1' hợp lệ", async ({ page }) => {
+        for (const v of ["has space", "ab-cd"]) {
+          await page.locator("#code").fill(v);
+          await page.locator("#code").blur();
+          await expect(formErrors(page, "Code"), v).toHaveText(
+            "The entity code must be alphanumeric or contain the '_' character",
+          );
+        }
+        await page.locator("#code").fill("A_b1");
+        await page.locator("#code").blur();
+        await expect(formErrors(page, "Code")).toHaveCount(0);
+      });
+
+      test("Code trùng với game có sẵn báo 'Game code is already existed' (validate/game/code)", async ({ page }) => {
+        // Code lấy từ chính danh sách game (dòng đầu tiên) - chỉ ĐỌC, không sửa gì
+        await cancelBtn(page).click();
+        await expect(page).toHaveURL(/\/game$/);
+        const { json } = await search(page);
+        test.skip(json.data.list.length === 0, "Không có dữ liệu");
+        const existing = json.data.list[0].code;
+        await startCreate(page);
+        const [res] = await Promise.all([
+          page.waitForResponse((r) => reqOf(r).url().endsWith("/validate/game/code")),
+          page.locator("#code").fill(existing).then(() => page.locator("#code").blur()),
+        ]);
+        expect((await res.json()).messageCode).toBe("DUPLICATE_GAME_CODE");
+        await expect(formErrors(page, "Code")).toHaveText("Game code is already existed");
+      });
+
+      test("Hit Rate: 0.001 / 12.5 hợp lệ; 100, 101, -1 báo lỗi khoảng giá trị", async ({ page }) => {
+        for (const v of ["0.001", "12.5", "99.99"]) {
+          await page.locator("#hitrate").fill(v);
+          await page.locator("#hitrate").blur();
+          await expect(formErrors(page, "Hit Rate"), v).toHaveCount(0);
+        }
+        for (const v of ["100", "101", "-1"]) {
+          await page.locator("#hitrate").fill(v);
+          await page.locator("#hitrate").blur();
+          await expect(formErrors(page, "Hit Rate").filter({ hasText: HIT_RATE_ERROR }), v).toHaveCount(1);
+        }
+      });
+
+      test("Status chọn lại Inactive thì đổi trên form", async ({ page }) => {
+        await page.locator('input[type="radio"][value="0"]').check();
+        await expect(page.locator('input[type="radio"][value="0"]')).toBeChecked();
+        await expect(page.locator('input[type="radio"][value="1"]')).not.toBeChecked();
+      });
+
+      test("Chọn Game Category thì Game Sub Category chỉ liệt kê sub category của category đó", async ({ page }) => {
+        const [res] = await Promise.all([
+          page.waitForResponse(
+            (r) => reqOf(r).url().endsWith("/game/game_sub_category/list") && /"gameCategoryIds":\[\d/.test(reqOf(r).postData() || ""),
+          ),
+          pickOption(page, "Game Category"),
+        ]);
+        const subs = (await res.json()).data.list;
+        expect(subs.length).toBeGreaterThan(0);
+        const category = JSON.parse(reqOf(res).postData()).filters.gameCategoryIds[0];
+        for (const s of subs) expect(s.gameCategoryId).toBe(category);
+        await formItem(page, "Game Sub Category").locator(".ant-select-selector").click();
+        await expect(openOptions(page).first()).toBeVisible();
+        const titles = await openOptions(page).evaluateAll((els) => els.map((e) => e.getAttribute("title")));
+        // Danh sách ảo: chỉ kiểm tra các option đang render đều thuộc sub category của category đã chọn
+        for (const t of titles) expect(subs.map((s) => s.name)).toContain(t);
+        await clickOutside(page);
+      });
+
+      test("Bước Currency: Next khi chưa thêm currency báo 'Please ensure at least 1 currency is added'", async ({ page }) => {
+        await fillBasic(page, {}, { optional: false });
+        await goToCurrencyStep(page);
+        await nextBtn(page).click();
+        await expect(
+          page.locator(".ant-form-item-explain-error").filter({ hasText: "Please ensure at least 1 currency is added" }),
+        ).toHaveCount(1);
+        expect(await activeStep(page)).toBe(2);
+      });
+
+      test("Bước Currency: thêm currency có denom thì denom mặc định được chọn sẵn, Min / Max Bet khớp, Next sang bước 3", async ({
+        page,
+      }) => {
+        await fillBasic(page, {}, { optional: false });
+        const ctx = await goToCurrencyStep(page);
+        const cur = await addCurrencyWithDenom(page, ctx);
+        test.skip(!cur, "Server không trả denom nào cho sub category đã chọn (denomination/dropdown trả mảng rỗng)");
+        const heads = await headers(page);
+        const cells = (await rows(page).first().locator("td").allInnerTexts()).map(norm);
+        expect(cells[heads.indexOf("Currency")]).toBe(cur.currency);
+        expect(cells[heads.indexOf("Denom name")]).toContain(cur.denom.name);
+        expect(num(cells[heads.indexOf("Min Bet")])).toBeCloseTo(cur.denom.minBet, 4);
+        expect(num(cells[heads.indexOf("Max Bet")])).toBeCloseTo(cur.denom.maxBet, 4);
+        await goToStep(page, 3);
+        await expect(rows(page).filter({ hasText: cur.currency })).toHaveCount(1);
+      });
+
+      test("Bước Paytable: thiếu Help Page thì báo 'Please enter help page content' và không sang bước 5", async ({ page }) => {
+        const qaLocal = { code: `QA_${Date.now()}` };
+        await fillBasic(page, qaLocal, { optional: false });
+        const ctx = await goToCurrencyStep(page);
+        const cur = await addCurrencyWithDenom(page, ctx);
+        test.skip(!cur, "Server không trả denom nào cho sub category đã chọn");
+        await goToStep(page, 4);
+        await addPaytable(page, qaLocal, { help: false });
+        await nextBtn(page).click();
+        await expect(page.getByText("Please enter help page content")).toBeVisible();
+        expect(await activeStep(page)).toBe(4);
+      });
+
+      test("Cancel quay về danh sách game, không cần xác nhận", async ({ page }) => {
+        await page.locator("#name").fill(`QA-${stamp}`); // đã nhập dở vẫn thoát được
+        await cancelBtn(page).click();
+        await expect(page).toHaveURL(/\/game$/);
+        await expect(breadcrumb(page)).toHaveText("Games");
+      });
+    });
+
+    // ---------- Tạo game thật (ghi dữ liệu): chỉ chạy khi RUN_FULL_TESTS=true ----------
+    test.describe("Tạo game thật và dọn dẹp (cần RUN_FULL_TESTS=true)", () => {
+      test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+      // Các test phụ thuộc nhau (tạo -> tìm -> xem -> Deactivate)
+      test.describe.configure({ mode: "serial" });
+
+      test("Điền đủ field bắt buộc + tuỳ chọn rồi Submit: tạo game thành công (toast, request / response, về /game)", async ({
+        page,
+      }) => {
+        test.setTimeout(240000);
+        const cur = await reachReview(page, qa);
+        test.skip(!cur, "Server không trả denom nào cho sub category đã chọn (denomination/dropdown trả mảng rỗng)");
+
+        // Trang Review hiển thị đúng dữ liệu đã nhập
+        const main = page.locator("main");
+        for (const text of [qa.name, qa.code, qa.category, qa.subCategory, qa.engine, cur.currency, cur.denomName, qa.paytable]) {
+          await expect(main, text).toContainText(text);
+        }
+        await expect(main).toContainText("Active");
+
+        const [req, res] = await Promise.all([
+          page.waitForRequest(isCreate),
+          page.waitForResponse(isCreate),
+          submitBtn(page).click(),
+        ]);
+        const json = await res.json();
+        if (json.status === "success") qaGames.push(qa); // để dọn dẹp dù các test sau fail
+
+        // Request: đúng dữ liệu đã nhập
+        const body = JSON.parse(req.postData());
+        expect(body.name).toBe(qa.name);
+        expect(body.code).toBe(qa.code);
+        expect(body.categoryId).toEqual(expect.any(Number));
+        expect(body.subCategoryId).toEqual(expect.any(Number));
+        expect(body.engine).toEqual(expect.any(Number));
+        expect(body.status).toBe(1);
+        expect(Number(body.hitrate)).toBe(Number(qa.hitRate));
+        const tiers = JSON.parse(body.winFormula).tiers;
+        expect(tiers.map((t) => [t.name, t.min, t.max ?? null])).toEqual(
+          Object.entries(WIN_TIERS).map(([n, [min, max]]) => [n.toUpperCase(), min, max ?? null]),
+        );
+        expect(body.currencyInfoList).toHaveLength(1);
+        expect(body.currencyInfoList[0]).toMatchObject({ id: cur.currencyId, denominationId: cur.denom.id });
+        expect(body.payTableInfoList).toHaveLength(1);
+        expect(body.payTableInfoList[0]).toMatchObject({ code: qa.paytable, isDefault: 1, rtp: "MEDIUM" });
+
+        // Response: thành công
+        expect(res.status()).toBe(200);
+        expect(json.status).toBe("success");
+        expect(json.messageCode).toBe("CREATE_GAME_SUCCESS");
+        // Toast thành công và chuyển về danh sách game
+        await expect(toast(page).filter({ hasText: "Game created successfully" })).toBeVisible();
+        await expect(page).toHaveURL(/\/game$/);
+        await expect(breadcrumb(page)).toHaveText("Games");
+      });
+
+      test("Game QA mới có trong danh sách khi lọc theo Code và theo Name, đúng dữ liệu đã nhập", async ({ page }) => {
+        test.setTimeout(180000);
+        test.skip(!qaGames.includes(qa), "Chưa tạo được game QA ở test trước");
+
+        // Lọc theo Code
+        const byCode = await findQaGame(page, qa, "code");
+        expect(byCode.found, `Không thấy game ${qa.code} trong danh sách`).not.toBeNull();
+        expect(byCode.body.filters.ids).toEqual([byCode.found.game.id]);
+        expect(byCode.json.data.totalCount).toBe(1);
+        const g = byCode.found.game;
+        qa.id = g.id;
+        expect(g).toMatchObject({ name: qa.name, code: qa.code, status: 1, maintenance: 0 });
+        await expect(rows(page)).toHaveCount(1);
+        const rec = (await tableRecords(page))[0];
+        expect(rec.ID).toBe(String(g.id));
+        expect(rec.Name).toBe(qa.name);
+        expect(rec.Code).toBe(qa.code);
+        expect(rec["Game Category"]).toBe(qa.category);
+        expect(rec["Game Sub Category"]).toBe(qa.subCategory);
+        expect(rec.Currency).toBe(qa.currencyInfo.currency);
+        expect(rec.Volatility).toBe(qa.volatility);
+        // Cột Languages hiện mã ngôn ngữ viết HOA (vd "AM" cho "Amharic"), response gửi mã thường (["am"])
+        expect(g.languages).toHaveLength(1);
+        expect(rec.Languages).toBe(g.languages[0].toUpperCase());
+        expect(rec.Maintenance).toBe(MAINTENANCE_TEXT[0]);
+        expect(rec.Status).toBe(STATUS_TEXT[1]);
+        for (const empty of ["Labels", "Features", "Themes", "Tags"]) expect(rec[empty], empty).toBe("");
+
+        // Lọc theo Name (tải lại trang để dropdown Name nạp game mới)
+        const byName = await findQaGame(page, qa, "name");
+        expect(byName.found, `Không thấy game ${qa.name} khi lọc theo Name`).not.toBeNull();
+        expect(byName.body.filters.ids).toEqual([g.id]);
+        expect(byName.json.data.totalCount).toBe(1);
+        expect((await columnValues(page, "Name"))[0]).toBe(qa.name);
+      });
+
+      test("Code của game QA đã tạo không dùng lại được (form báo trùng, không sang bước 2)", async ({ page }) => {
+        test.skip(!qaGames.includes(qa), "Chưa tạo được game QA ở test trước");
+        // Tạo lần 2 với cùng Code: form báo trùng (validate/game/code) và không cho sang bước 2
+        await startCreate(page);
+        await page.locator("#name").fill(`QA-${stamp}-dup`);
+        const [res] = await Promise.all([
+          page.waitForResponse((r) => reqOf(r).url().endsWith("/validate/game/code")),
+          page.locator("#code").fill(qa.code).then(() => page.locator("#code").blur()),
+        ]);
+        expect((await res.json()).messageCode).toBe("DUPLICATE_GAME_CODE");
+        await expect(formErrors(page, "Code")).toHaveText("Game code is already existed");
+        await nextBtn(page).click();
+        expect(await activeStep(page)).toBe(1);
+      });
+
+      test("Màn hình Update của game QA hiển thị đúng dữ liệu đã tạo (game/view)", async ({ page }) => {
+        test.setTimeout(180000);
+        test.skip(!qaGames.includes(qa), "Chưa tạo được game QA ở test trước");
+        const { found } = await findQaGame(page, qa);
+        expect(found).not.toBeNull();
+        const [viewRes] = await Promise.all([
+          page.waitForResponse(isView),
+          rowAt(page, found.index).locator("td").last().locator("svg").nth(1).click(),
+        ]);
+        await expect(page).toHaveURL(new RegExp(`/game/update/${found.game.id}$`));
+        const v = (await viewRes.json()).data;
+        expect(v).toMatchObject({ id: found.game.id, name: qa.name, code: qa.code, status: 1 });
+        expect(v.gameCategory.label).toBe(qa.category);
+        expect(v.gameSubCategory.label).toBe(qa.subCategory);
+        expect(Number(v.hitrate)).toBe(Number(qa.hitRate));
+        expect(JSON.parse(v.winFormula).tiers).toHaveLength(Object.keys(WIN_TIERS).length);
+        expect(v.currencyInfoList).toHaveLength(1);
+        expect(v.currencyInfoList[0]).toMatchObject({
+          code: qa.currencyInfo.currency,
+          denomName: qa.currencyInfo.denom.name,
+        });
+        expect(v.payTableInfoList).toHaveLength(1);
+        expect(v.payTableInfoList[0].code).toBe(qa.paytable);
+        // Form hiển thị đúng giá trị
+        await expect(page.locator("#name")).toHaveValue(qa.name);
+        await expect(page.locator("#code")).toHaveValue(qa.code);
+        await expect(page.locator("#hitrate")).toHaveValue(qa.hitRate);
+        await expect(formItem(page, "Engine").locator(".ant-select-selection-item[title]")).toHaveAttribute("title", qa.engine);
+        await cancelBtn(page).click(); // không sửa gì
+        await expect(page).toHaveURL(/\/game$/);
+      });
+
+      test("Dọn dẹp: Deactivate game QA vừa tạo (màn hình không có Delete) và game chuyển Inactive", async ({ page }) => {
+        test.setTimeout(180000);
+        test.skip(!qaGames.includes(qa), "Chưa tạo được game QA ở test trước");
+        const done = await deactivateQaGame(page, qa);
+        expect(done, "Game QA phải đang Active để Deactivate").toBeTruthy();
+        await expect(toast(page).filter({ hasText: "Game status successfully updated" })).toBeVisible();
+        // Tải lại danh sách: game QA đã Inactive
+        const { found } = await findQaGame(page, qa);
+        expect(found.game.status).toBe(0);
+        expect((await tableRecords(page))[0].Status).toBe(STATUS_TEXT[0]);
+        // Menu của game Inactive có Activate thay cho Deactivate
+        const items = await menuItems(await openRowMenu(page, found.index));
+        expect(items).toContain("Activate");
+        expect(items).not.toContain("Deactivate");
+        qa.cleaned = true;
+        qaGames.splice(qaGames.indexOf(qa), 1); // đã dọn xong, afterAll không cần làm gì
+      });
+    });
+
+    // ---------- Server từ chối dữ liệu sai: có gửi request tạo nhưng KHÔNG tạo game ----------
+    test.describe("Server từ chối dữ liệu sai khi Submit (cần RUN_FULL_TESTS=true)", () => {
+      test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+
+      test("Name có ký tự '_' bị server từ chối (VALIDATION_FAILED), ở lại trang tạo game và hiện toast lỗi", async ({
+        page,
+      }) => {
+        test.setTimeout(240000);
+        const bad = { name: `QA_${stamp}_n`, code: `QA_${stamp}01`, hitRate: "12.5" };
+        const cur = await reachReview(page, bad, { optional: false });
+        test.skip(!cur, "Server không trả denom nào cho sub category đã chọn");
+        const [res] = await Promise.all([page.waitForResponse(isCreate), submitBtn(page).click()]);
+        const json = await res.json();
+        if (json.status === "success") qaGames.push(bad); // phòng khi server vô tình chấp nhận: dọn ở afterAll của nhóm kia
+        expect(json.status).toBe("fail");
+        expect(json.messageCode).toBe("VALIDATION_FAILED");
+        expect(json.validation.Name).toEqual(["Name must be alphanumeric or contain the symbols . , - ' character"]);
+        await expect(toast(page).filter({ hasText: "Validation failed" })).toBeVisible();
+        await expect(page).toHaveURL(/\/game\/create-game$/);
+        expect(await activeStep(page)).toBe(5);
+      });
+
+      test("Không có paytable nào bị server từ chối ('PayTableInfoList cannot be empty') dù form cho Next", async ({ page }) => {
+        test.setTimeout(240000);
+        const bad = { name: `QA-${stamp}-p`, code: `QA_${stamp}02`, hitRate: "12.5" };
+        const cur = await reachReview(page, bad, { optional: false, paytable: false });
+        test.skip(!cur, "Server không trả denom nào cho sub category đã chọn");
+        const [res] = await Promise.all([page.waitForResponse(isCreate), submitBtn(page).click()]);
+        const json = await res.json();
+        if (json.status === "success") qaGames.push(bad);
+        expect(json.status).toBe("fail");
+        expect(json.validation.PayTableInfoList).toEqual(["PayTableInfoList cannot be empty"]);
+        await expect(toast(page).filter({ hasText: "Validation failed" })).toBeVisible();
+        await expect(page).toHaveURL(/\/game\/create-game$/);
+      });
+    });
+
+    // Dọn nốt mọi game QA còn Active (vd khi 1 test phía trước fail trước bước "Dọn dẹp", hoặc server vô tình chấp
+    // nhận dữ liệu sai ở nhóm "Server từ chối"). Game đã dọn xong được bỏ khỏi qaGames nên thường không làm gì.
+    test.afterAll(async ({ browser, baseURL }) => {
+      if (!qaGames.length) return;
+      test.setTimeout(180000);
+      const context = await browser.newContext({ baseURL, storageState: buildStorageState(), viewport: { width: 1920, height: 1080 } });
+      try {
+        for (const g of [...qaGames]) {
+          const page = await context.newPage();
+          await deactivateQaGame(page, g);
+          await page.close();
+        }
+      } finally {
+        await context.close();
+      }
     });
   });
 
