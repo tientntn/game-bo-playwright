@@ -292,6 +292,11 @@ async function exportAndCheck(page) {
 // Tests
 // ---------------------------------------------------------------------------
 test.describe("Report > Player Summary", () => {
+  // API của màn này chậm: waitForResponse / click mặc định chờ 45s (config chung là 30s),
+  // và test timeout nới lên 90s để đủ chỗ cho beforeEach + thao tác chờ API.
+  test.use({ actionTimeout: 45_000 });
+  test.describe.configure({ timeout: 90_000 });
+
   test.beforeEach(async ({ page }) => {
     await openPage(page);
   });

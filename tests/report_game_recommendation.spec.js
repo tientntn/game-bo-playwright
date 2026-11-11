@@ -910,6 +910,8 @@ test.describe("Report > Game Recommendation", () => {
 
   // ===== 8. Sắp xếp =====
   test.describe("Sắp xếp", () => {
+    // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): sort cột "Total Bet Counts" và "Total Unique Player Counts"
+    // trả thứ tự không khớp giá trị hiển thị (vd tăng dần ra 1, 28, 0, 0, 4, 6, 0, 0, 31, 32). Các cột số khác sort đúng.
     for (const [column, sortBy] of Object.entries(SORTABLE)) {
       test(`Sort cột ${column}`, async ({ page }) => {
         // Mở rộng 7 ngày để có nhiều dòng; nếu không đủ dòng thì chỉ kiểm tra request

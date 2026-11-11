@@ -1613,7 +1613,9 @@ test.describe("Master Agents > Create Master Agent (ghi dữ liệu thật)", ()
     test.setTimeout(120000);
     const stamp = Date.now();
     const name = `QA-AUTO-${stamp}`;
-    const code = `qaauto${stamp}`;
+    // subDomain app tự sinh = "http://masterAgent.newfuture.com/" (33 ký tự) + code và bị giới hạn 50 ký tự
+    // (VALIDATION_FAILED "SubDomain must not exceed 50 characters") -> code phải ngắn: qaauto + 8 số cuối của timestamp
+    const code = `qaauto${String(stamp).slice(-8)}`;
     const field = (label) =>
       page.locator(".ant-form-item").filter({ has: page.locator(".ant-form-item-label label", { hasText: label }) }).first();
     const heading = page.getByText("Create Master Agent", { exact: true });
