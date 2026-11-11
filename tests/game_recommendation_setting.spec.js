@@ -22,7 +22,10 @@
 //    (route.abort); test kiểm tra payload của Save / công tắc dùng route.fulfill trả về kết quả GIẢ (request KHÔNG tới server). Test khai báo rõ
 //    request ghi được phép (allowedWrites) và afterEach so sánh chính xác với danh sách request ghi bắt được (watchWrites).
 //    Bản ghi có sẵn của team (vd dòng "ZZ Audit Agent Upd") chỉ bị thao tác bằng request GIẢ, không bao giờ bị ghi thật.
-//  - Nhóm "CRUD (ghi dữ liệu thật)" (describe cuối, chạy tuần tự): màn hình không cho tạo agent nên KHÔNG gắn được tiền tố QA-AUTO;
+//  - Nhóm "CRUD (ghi dữ liệu thật)" (describe cuối, chạy tuần tự) có gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    cờ false / không khai báo -> cả nhóm bị skip, không gửi request ghi nào; chỉ chạy khi RUN_FULL_TESTS=true. Lệnh ví dụ (PowerShell):
+//      $env:RUN_FULL_TESTS="true"; npx playwright test tests/game_recommendation_setting.spec.js --project=setup --project=chromium -g "CRUD"
+//    Màn hình không cho tạo agent nên KHÔNG gắn được tiền tố QA-AUTO;
 //    test dùng 1 agent QA do các lần chạy QA trước tạo sẵn (code "QATESTAG<timestamp>", label "QA Test Agent <timestamp>") và CHƯA có
 //    cấu hình trong bảng. Test thêm cấu hình cho agent đó, bật / tắt công tắc, rồi GỠ cấu hình bằng cách bật lại cả 2 công tắc
 //    (tự gỡ khỏi bảng). afterAll luôn dọn lại (nếu bản ghi còn sót thì bật cả 2 công tắc). afterEach kiểm tra mọi request ghi đều
@@ -31,6 +34,7 @@
 //  - Chưa kiểm chứng được bằng UI thật: nội dung toast khi server lỗi lúc bật / tắt công tắc (chỉ kiểm tra toast "Error" bằng response giả).
 const { test, expect } = require("@playwright/test");
 const { randomUUID } = require("crypto");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 const { buildStorageState } = require("./helpers/session");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1130,7 +1134,8 @@ test.describe("Game Recommendation > Settings", () => {
   });
 
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên agent QA) =====
-  test.describe("CRUD (ghi dữ liệu thật trên agent QA, tự dọn lại)", () => {
+  test.describe("CRUD (ghi dữ liệu thật trên agent QA, tự dọn lại - cần RUN_FULL_TESTS=true)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     let target; // { master, agent } - agent QA được thêm cấu hình (chọn ở test đầu tiên)

@@ -26,7 +26,9 @@
 //  - Mọi describe trừ describe cuối là "chỉ đọc": request ghi (user/create, user/update, user/update-user-status, reset-...) bị chặn ở tầng mạng (route.abort)
 //    hoặc được trả về response GIẢ (route.fulfill, request KHÔNG tới server) để kiểm tra payload / toast. afterEach so sánh chính xác request ghi bắt
 //    được (watchWrites) với danh sách được phép (allowedWrites). User có sẵn của team chỉ bị thao tác bằng request GIẢ, KHÔNG bao giờ bị ghi thật.
-//  - Describe cuối "CRUD (ghi dữ liệu thật trên user QA)" chạy tuần tự, CHỈ thao tác trên 1 user QA (username "qaauto<6 số>", Real Name "QA AUTO <6 số>"):
+//  - Describe cuối "CRUD (ghi dữ liệu thật trên user QA)" được gắn cờ RUN_FULL_TESTS (xem RUN_FULL_TESTS.md): RUN_FULL_TESTS=false (mặc định)
+//    -> cả nhóm bị SKIP, không gửi request ghi nào; RUN_FULL_TESTS=true mới tạo / sửa user QA thật.
+//    Nhóm chạy tuần tự, CHỈ thao tác trên 1 user QA (username "qaauto<6 số>", Real Name "QA AUTO <6 số>"):
 //      * Màn hình KHÔNG có chức năng xoá user -> user QA KHÔNG dọn được bằng UI, nên test chỉ TẠO user QA khi chưa có user nào (tối đa 1 lần trong
 //        vòng đời, tạo ở trạng thái Inactive), các lần chạy sau dùng lại user đó. Sửa tên / bật tắt trạng thái xong luôn khôi phục (finally + afterAll).
 //      * Test tạo trùng Username: bị chặn ngay ở bước validate (user/validate/username là request ĐỌC) nên không ghi gì.
@@ -35,6 +37,7 @@
 //  - Toast của Create / Reset (nhánh response GIẢ) không phản ánh server thật; luồng "tạo user QA lần đầu" chỉ kiểm chứng khi chạy thật.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -2090,6 +2093,7 @@ test.describe("Master Agent > Users", () => {
 
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên user QA) =====
   test.describe("CRUD (ghi dữ liệu thật trên user QA, luôn khôi phục lại)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     let qa; // { id, username, name, sasEntityId, status } - user QA (username bắt đầu bằng qaauto, Real Name "QA AUTO ...")

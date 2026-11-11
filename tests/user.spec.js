@@ -1,10 +1,14 @@
 // login.spec.js
+// Cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md): test "Create user success" tạo user thật (không dọn được)
+// nên chỉ chạy khi RUN_FULL_TESTS=true; =false (mặc định) -> skip, không gửi request ghi. "View house" chỉ đọc nên luôn chạy.
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 import { format } from "date-fns";
 const timestamp = format(new Date(), "yyyyMMddHHmmss");
 const random = `${timestamp.substring(6)}`;
 
 test("Create user success", async ({ page }) => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
   await page.goto("/admin/users/create");
 
   await page.getByRole("textbox", { name: "* Username :" }).click();

@@ -19,7 +19,9 @@
 //  - Mọi describe trừ cuối là "chỉ đọc": request ghi (currency/create, currency/update, currency/deactivate) bị chặn ở tầng mạng (route.abort); test kiểm tra payload / thông báo
 //    dùng route.fulfill trả response GIẢ (request KHÔNG tới server). afterEach so sánh chính xác request ghi bắt được (watchWrites) với danh sách được phép (allowedWrites).
 //    currency/validate/code, currencyrate/history, currency/view là request ĐỌC (validate chỉ kiểm tra, không ghi). Currency có sẵn của team chỉ bị thao tác bằng request GIẢ.
-//  - Describe cuối "CRUD (ghi dữ liệu thật)" chạy tuần tự, CHỈ thao tác trên 1 currency QA (code "QAUI" + 6 chữ HOA, name "QA-UI-CURRENCY <code>"):
+//  - Describe cuối "CRUD (ghi dữ liệu thật)" được gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    RUN_FULL_TESTS=false (mặc định) -> cả nhóm bị skip, KHÔNG gửi request ghi nào; =true -> mới chạy.
+//    Nhóm này chạy tuần tự, CHỈ thao tác trên 1 currency QA (code "QAUI" + 6 chữ HOA, name "QA-UI-CURRENCY <code>"):
 //      * Màn hình KHÔNG có chức năng xoá -> currency QA KHÔNG dọn được bằng UI, nên test chỉ TẠO khi chưa có currency QAUI... nào (tối đa 1 lần trong cả vòng đời),
 //        các lần chạy sau dùng lại. Mọi test sửa (name / max payout / exchange rate / sweep / status) đều khôi phục về giá trị gốc trong finally + afterAll
 //        (riêng lịch sử tỉ giá thì tăng thêm dòng sau mỗi lần đổi rồi khôi phục tỉ giá - không xoá được).
@@ -28,6 +30,7 @@
 //  - Không hard-code dữ liệu: currency dùng cho test đều lấy từ response list.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1570,6 +1573,7 @@ test.describe("Administration > Currency", () => {
 
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên currency QA) =====
   test.describe("CRUD (ghi dữ liệu thật trên currency QA, luôn khôi phục lại)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     let qa; // { id, code, name, maxPayout, exchangeRate, isSweep, status } - currency QA gốc (code QAUI + 6 chữ HOA, name QA-UI-CURRENCY <code>)

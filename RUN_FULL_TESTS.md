@@ -97,9 +97,19 @@ Biến môi trường của shell **ưu tiên hơn** `.env` (dotenv không ghi �
 | `tests/agent_entity.spec.js` (nhóm "Agents > Create Agent (ghi dữ liệu thật)") | Có |
 | `tests/admin_users.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên user QA, luôn khôi phục lại)") | Có |
 | `tests/admin_roles.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên role QA, luôn khôi phục lại)") | Có |
+| `tests/admin_currency.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên currency QA, luôn khôi phục lại)") | Có |
 | `tests/admin_geofencing.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên IP QA, luôn xoá lại)") | Có |
 | `tests/admin_risk_management.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên rule QA-AUTO, kết thúc ở Inactive)") | Có |
-| Các spec khác có ghi dữ liệu (vd `admin_currency.spec.js` describe "CRUD", user / roles / entity...) | **Chưa** - vẫn chạy bất kể cờ. Cần rà soát và gắn cờ nếu muốn `false` = hoàn toàn không tạo dữ liệu. |
+| `tests/admin_permission.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên quyền QA, luôn khôi phục lại)") | Có |
+| `tests/game_recommendation.spec.js` (describe cuối "Game Recommendation (CRUD - ghi dữ liệu thật)") | Có |
+| `tests/download_history.spec.js` (nhóm "CRUD (ghi dữ liệu thật)": Export Currency thật rồi xoá bản ghi) | **Chưa** - vẫn chạy bất kể cờ, cần gắn cờ |
+| `tests/user.spec.js` (test "Create user success": tạo user thật `tien<số>`, không dọn) | Có (gắn cờ riêng test này; file cũ, chưa theo quy ước QA / dọn dẹp) |
+
+### Spec chưa gắn cờ nhưng không cần cờ (rà soát)
+
+- **Chỉ đọc, mọi request ghi bị chặn (`route.abort`) hoặc trả response GIẢ:** `admin_audit_logs`, `admin_manager_event`, `game_recommendation_content`, `game_denom`, `game_update` (không bao giờ bấm Submit / Confirm / Delete), `user_menu` (không đổi mật khẩu / logout thật).
+- **Chỉ đọc nhưng có test Export:** `player`, `report_bet_history`, `report_failed_operator_request`, `report_game_recommendation`, `report_summary_game`, `report_summary_player`, `report_summary_promotion`. Export chỉ tạo 1 job / bản ghi trong Download History (không dọn), không tạo / sửa dữ liệu nghiệp vụ nên hiện KHÔNG gắn cờ. Nếu muốn `false` = tuyệt đối không tạo gì thì gắn cờ riêng các test "Export ..." này.
+- **Chỉ đọc hoàn toàn:** `report_alert`, `report_segmentation_player` ("Save" ở Customize Table chỉ lưu trên trình duyệt).
 
 ## Lưu ý
 

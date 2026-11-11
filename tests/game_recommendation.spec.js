@@ -15,7 +15,8 @@
 // AN TOÀN DỮ LIỆU:
 //  - Nhóm test "chỉ đọc" (mọi describe trừ cuối): KHÔNG gửi request ghi. Có 2 lớp bảo hiểm: watchWrites (afterEach kiểm tra không có
 //    request ghi) và route.abort mọi POST ghi. Chỉ mở modal, kiểm tra nội dung / validation (form lỗi nên bị chặn) rồi Cancel / X.
-//  - Nhóm "CRUD (ghi dữ liệu thật)" (describe cuối, chạy tuần tự): mỗi test TỰ TẠO 1 bản ghi đề xuất cho 1 game mà hệ thống báo
+//  - Nhóm "CRUD (ghi dữ liệu thật)" (describe cuối) được gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    RUN_FULL_TESTS=false (mặc định) -> cả nhóm bị skip, KHÔNG gửi request ghi nào; =true -> mới chạy. Nhóm này chạy tuần tự: mỗi test TỰ TẠO 1 bản ghi đề xuất cho 1 game mà hệ thống báo
 //    chưa có đề xuất (game cuối cùng của available-games), thao tác sửa / xoá CHỈ trên bản ghi đó rồi XOÁ bằng UI trong finally / afterEach.
 //    Bản ghi đề xuất không có trường tên nên không gắn được tiền tố QA-AUTO-; bản ghi được nhận diện bằng đúng gameId do test tạo ra
 //    (so với id trả về ở response create). KHÔNG sửa / xoá bản ghi có sẵn của team. Group / Priority Game chỉ được tham chiếu (không đổi).
@@ -23,6 +24,7 @@
 // Dữ liệu dev ít (~12 bản ghi) nên test phân trang dùng 10 dòng/trang; test nào cần dữ liệu mà không đủ sẽ tự skip.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 test.use({
   viewport: { width: 1920, height: 1080 },
@@ -1079,6 +1081,7 @@ test.describe("Game Recommendation > Game Recommendation (chỉ đọc)", () => 
 // Tests CRUD - GHI dữ liệu thật trên bản ghi do chính test tạo ra (chạy tuần tự, dọn lại bằng UI)
 // ---------------------------------------------------------------------------
 test.describe("Game Recommendation > Game Recommendation (CRUD - ghi dữ liệu thật)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
   test.describe.configure({ mode: "serial" });
 
   let writes;

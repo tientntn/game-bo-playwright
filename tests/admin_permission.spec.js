@@ -20,7 +20,9 @@
 //  - Mọi describe trừ cuối là "chỉ đọc": request ghi (permission/create, permission/update) bị chặn ở tầng mạng (route.abort); test kiểm tra payload / thông báo
 //    dùng route.fulfill trả response GIẢ (request KHÔNG tới server). afterEach so sánh chính xác request ghi bắt được (watchWrites) với danh sách được phép (allowedWrites).
 //    Quyền có sẵn của team chỉ bị thao tác bằng request GIẢ, không bao giờ bị ghi thật.
-//  - Describe cuối "CRUD (ghi dữ liệu thật)" chạy tuần tự, CHỈ thao tác trên 1 quyền QA (name "QA_UI_PERM_<timestamp>", category "QA_UI_CATEGORY", Public = False, Roles = Admin):
+//  - Describe cuối "CRUD (ghi dữ liệu thật)" được gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    RUN_FULL_TESTS=false (mặc định) -> cả nhóm bị skip, KHÔNG gửi request ghi nào; =true -> mới chạy.
+//    Nhóm này chạy tuần tự, CHỈ thao tác trên 1 quyền QA (name "QA_UI_PERM_<timestamp>", category "QA_UI_CATEGORY", Public = False, Roles = Admin):
 //      * Màn hình KHÔNG có chức năng xoá quyền -> quyền QA KHÔNG dọn được bằng UI, nên test chỉ TẠO khi chưa có quyền QA_UI_PERM_ nào (tối đa 1 lần trong cả vòng đời),
 //        các lần chạy sau dùng lại quyền đó. Mọi test sửa (name / url / category / Roles / Public) đều khôi phục về giá trị gốc trong finally + afterAll.
 //      * Không có test "tạo trùng": dữ liệu hiện tại có sẵn quyền trùng tên (server có vẻ không chặn trùng) nên tạo trùng thật sẽ sinh thêm bản ghi rác không xoá được.
@@ -28,6 +30,7 @@
 //  - Không hard-code dữ liệu: quyền dùng cho test đều lấy từ response list.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1240,6 +1243,7 @@ test.describe("Administration > Permissions", () => {
 
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên quyền QA) =====
   test.describe("CRUD (ghi dữ liệu thật trên quyền QA, luôn khôi phục lại)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     let qa; // { id, name, url, type, category, hierarchyMap } - quyền QA gốc (name QA_UI_PERM_<ts>, Public = False, Roles = Admin)
