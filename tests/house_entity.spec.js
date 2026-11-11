@@ -23,11 +23,14 @@
 //    (màn hình không có Delete nên không xoá được; house QA-AUTO để lại ở trạng thái Inactive). afterEach kiểm tra mọi request ghi chỉ là
 //    house/create đúng payload và house/update-status chỉ nhắm vào id house QA-AUTO vừa tạo.
 //    Test kiểm tra house/create trả success (hành vi đúng mong đợi).
+//    Describe này gắn cờ RUN_FULL_TESTS (xem RUN_FULL_TESTS.md): RUN_FULL_TESTS=false (mặc định) -> skipped, KHÔNG tạo house nào;
+//    RUN_FULL_TESTS=true trong .env -> mới tạo house QA-AUTO thật.
 //  - Export tạo bản ghi ở Download History; nếu file cùng filter đã tồn tại thì hộp thoại "Download Now / Download New" hiện ra và
 //    test KHÔNG bấm Download New (tránh xoá file cũ).
 //  - Không hard-code dữ liệu: house / currency / game category / id đều lấy từ response list và dropdown; id màn hình con lấy từ icon ở dòng.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1479,6 +1482,7 @@ test.describe("Houses > View / Update / Create (không ghi dữ liệu thật)",
 // Tests: ghi dữ liệu THẬT (tạo house QA-AUTO, rồi dọn bằng Deactivate)
 // ---------------------------------------------------------------------------
 test.describe("Houses > Create House (ghi dữ liệu thật)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
   test.describe.configure({ mode: "serial" });
 
   let writes;
