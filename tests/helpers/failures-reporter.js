@@ -67,23 +67,83 @@ function hasKnownBugMarker(test) {
 }
 
 // ---------------------------------------------------------------------------
-// Dịch log của Playwright thành các bước dễ đọc
+// Dịch log của Playwright thành các bước người không biết lập trình đọc được
+// Ví dụ: "Bấm vào ô lọc "House"" / "Chọn "Royal Edge House" trong danh sách đang mở" / "Bấm nút "Search""
 // ---------------------------------------------------------------------------
-// getByRole('button', { name: 'Next', exact: true }) -> nút "Next"
-function humanLocator(s) {
-  return String(s)
-    .replace(/\.filter\(\{ hasText: \/\^\\s\*(.*?)\\s\*\$\/\w* \}\)/g, ' có chữ "$1"')
-    .replace(/\.filter\(\{ hasText: '([^']*)' \}\)/g, ' có chữ "$1"')
-    .replace(/getByRole\('(\w+)', \{ name: (?:'([^']*)'|\/(.*?)\/\w*)[^}]*\}\)/g, (_, role, name, re) => {
-      const roleVi = { button: "nút", link: "link", checkbox: "checkbox", tab: "tab", menuitem: "menu", columnheader: "cột", textbox: "ô nhập", combobox: "ô chọn", row: "dòng", dialog: "hộp thoại" }[role] || role;
-      return `${roleVi} "${name ?? re}"`;
-    })
-    .replace(/getByRole\('(\w+)'\)/g, "$1")
-    .replace(/getByPlaceholder\('([^']*)'\)/g, 'ô có placeholder "$1"')
-    .replace(/getByText\('([^']*)'(?:, \{[^}]*\})?\)/g, 'chữ "$1"')
-    .replace(/getByLabel\('([^']*)'\)/g, 'ô "$1"')
-    .replace(/getByTitle\('([^']*)'\)/g, 'icon "$1"')
-    .replace(/getByTestId\('([^']*)'\)/g, 'phần tử "$1"');
+// houseIds -> House ; masterAgentIds -> Master Agent ; gameCategoryId -> Game Category
+function fieldName(id) {
+  return id
+    .replace(/_/g, " ")
+    .replace(/Ids?$/, "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+// Tên nút Ant Design hay có tên icon đứng trước: "search Search" -> "Search", "close Reset" -> "Reset"
+const cleanButtonName = (n) => n.replace(/^[a-z-]+ (?=[A-Z])/, "").trim();
+
+// Lấy chữ trong .filter({ hasText: ... }) / has-text của chuỗi locator
+function textOf(r) {
+  let m = r.match(/hasText: \/\^\\s\*(.*?)\\s\*\$\/\w*/) || r.match(/hasText: '([^']*)'/) || r.match(/hasText: "([^"]*)"/);
+  if (m) return m[1];
+  m = r.match(/getByText\('([^']*)'/);
+  return m ? m[1] : null;
+}
+
+// Mô tả "cái gì" bằng tiếng Việt từ chuỗi locator; trả về { vi, known }
+function describeTarget(raw) {
+  const r = String(raw);
+  const text = textOf(r);
+  const which = /\.first\(\)\s*$/.test(r) ? " đầu tiên" : /\.last\(\)\s*$/.test(r) ? " cuối cùng" : "";
+  let m;
+
+  if ((m = r.match(/getByRole\('(\w+)', \{ name: (?:'([^']*)'|\/(.*?)\/\w*)/))) {
+    const role = { button: "nút", link: "link", checkbox: "ô tích", tab: "tab", menuitem: "mục menu", columnheader: "tiêu đề cột", textbox: "ô nhập", combobox: "ô chọn", row: "dòng", dialog: "hộp thoại" }[m[1]] || m[1];
+    return { vi: `${role} "${cleanButtonName(m[2] ?? m[3])}"`, known: true };
+  }
+  if ((m = r.match(/getByPlaceholder\('([^']*)'/))) return { vi: `ô nhập "${m[1]}"`, known: true };
+  if ((m = r.match(/getByLabel\('([^']*)'/))) return { vi: `ô "${m[1]}"`, known: true };
+  // Ô nhập tìm theo id ở cuối chuỗi: ...locator('#list_0_value')
+  if ((m = r.match(/locator\('#(\w+)'\)(?:\.(?:first|last)\(\))?\s*$/))) return { vi: `ô "${fieldName(m[1])}"`, known: true };
+  if ((m = r.match(/has: (?:page\.)?locator\('#(\w+)'\)/))) return { vi: `ô lọc "${fieldName(m[1])}"`, known: true };
+  if (/\.ant-select-item-option/.test(r)) return { vi: text ? `mục "${text}" trong danh sách đang mở` : `một mục${which} trong danh sách đang mở`, known: true };
+  if (/\.ant-select-dropdown/.test(r)) return { vi: "danh sách thả xuống", known: true };
+  if (/ant-pagination-next/.test(r)) return { vi: 'nút phân trang "trang sau"', known: true };
+  if (/ant-pagination-prev/.test(r)) return { vi: 'nút phân trang "trang trước"', known: true };
+  if (/ant-pagination-options/.test(r)) return { vi: 'ô chọn "số dòng / trang"', known: true };
+  if (/ant-pagination-item-active/.test(r)) return { vi: "số trang đang chọn", known: true };
+  if (/ant-pagination-item/.test(r)) return { vi: `số trang${text ? ` "${text}"` : ""}`, known: true };
+  if (/manage-column__bu/.test(r)) return { vi: 'nút "Manage Columns" (chọn cột hiển thị)', known: true };
+  if (/manage-column__list__items/.test(r)) return { vi: text ? `cột "${text}" trong hộp Manage Columns` : "một cột trong hộp Manage Columns", known: true };
+  if (/manage-column/.test(r)) return { vi: "hộp Manage Columns", known: true };
+  if (/create-btn/.test(r)) return { vi: 'nút tạo mới (Create / Add)', known: true };
+  if (/label-form-title/.test(r)) return { vi: "tiêu đề màn hình", known: true };
+  if (/NextGen-filter-element|NextGen-filter-dropdown/.test(r)) return { vi: "một ô lọc", known: true };
+  if (/NextGen-modal/.test(r)) return { vi: /modal-title/.test(r) ? "tiêu đề hộp thoại" : "hộp thoại", known: true };
+  if (/ant-modal-close/.test(r)) return { vi: "nút (x) đóng hộp thoại", known: true };
+  if (/ant-modal-title/.test(r)) return { vi: "tiêu đề hộp thoại", known: true };
+  if (/ant-modal/.test(r)) return { vi: "hộp thoại", known: true };
+  if (/thead th|ant-table-thead/.test(r)) return { vi: text ? `tiêu đề cột "${text}"` : "tiêu đề cột", known: true };
+  if (/ant-table-tbody|tbody tr|ant-table-row/.test(r)) return { vi: `dòng${which} trong bảng${text ? ` có chữ "${text}"` : ""}`, known: true };
+  if (/Toastify/.test(r)) return { vi: `thông báo (toast)${text ? ` có chữ "${text}"` : ""}`, known: true };
+  if (/ant-tooltip/.test(r)) return { vi: `tooltip${text ? ` có chữ "${text}"` : ""}`, known: true };
+  if (/ant-popover/.test(r)) return { vi: "hộp popover", known: true };
+  if (/ant-tag/.test(r)) return { vi: "nhãn (tag)", known: true };
+  if (/ant-spin/.test(r)) return { vi: "biểu tượng đang tải", known: true };
+  if ((m = r.match(/locator\('#(\w+)'\)/))) return { vi: `ô "${fieldName(m[1])}"`, known: true };
+  if (text) return { vi: `chữ "${text}"`, known: true };
+  // Không nhận ra: giữ selector rút gọn trong ngoặc để dev tra
+  const sel = r.length > 70 ? r.slice(0, 67) + "..." : r;
+  return { vi: `một phần tử trên trang (${sel})`, known: false };
+}
+
+// Các bước thuần kỹ thuật, QA không cần thấy
+function isNoise(t) {
+  return (
+    /^(Before Hooks|After Hooks|Worker Cleanup|Fixture|Attach|Create context|Create page|Launch browser|Close context|Evaluate|Wait for event|Request ghi dữ liệu)/i.test(t) ||
+    /Expect "poll/i.test(t) ||
+    /ant-spin|NextGen-filter-bar|breadcrumb|networkidle|load state|Wait for (?:navigation|URL)/i.test(t)
+  );
 }
 
 // Trả về chuỗi tiếng Việt cho 1 step, hoặc null nếu step không đáng hiển thị
@@ -91,60 +151,67 @@ function humanizeStep(step) {
   const t = stripAnsi(step.title || "").trim();
   if (!t) return null;
   if (step.category === "hook" || step.category === "fixture") return null;
-  if (/^(Before Hooks|After Hooks|Worker Cleanup|Fixture|Attach|Create context|Create page|Launch browser|Close context|Evaluate|Wait for event|Request ghi dữ liệu)/i.test(t)) return null;
+  if (isNoise(t)) return null;
 
   let m;
-  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Mở trang \`${m[1]}\``;
-  if ((m = t.match(/^Reload/i))) return "Tải lại trang (F5)";
-  if ((m = t.match(/^Click\s+(.*)/i))) return `Bấm ${humanLocator(m[1])}`;
-  if ((m = t.match(/^Fill\s+"(.*?)"\s+(.*)$/i))) return `Nhập "${m[1]}" vào ${humanLocator(m[2])}`;
-  if ((m = t.match(/^Fill\s+(.*)/i))) return `Xoá / nhập ${humanLocator(m[1])}`;
-  if ((m = t.match(/^Hover\s+(.*)/i))) return `Rê chuột vào ${humanLocator(m[1])}`;
-  if ((m = t.match(/^(?:Press|Type)\s+(.*)/i))) return `Gõ phím / nhập ${humanLocator(m[1])}`;
-  if ((m = t.match(/^Check\s+(.*)/i))) return `Tích chọn ${humanLocator(m[1])}`;
-  if ((m = t.match(/^Select\s+(.*)/i))) return `Chọn ${humanLocator(m[1])}`;
-  if ((m = t.match(/^Wait for (?:response|request)\s*(.*)/i))) return `Chờ API phản hồi ${m[1] ? "(" + m[1].slice(0, 80) + ")" : ""}`.trim();
-  if ((m = t.match(/^Wait for (?:load state|navigation|URL)\s*(.*)/i))) return null; // nhiễu
-  if ((m = t.match(/^Wait for (?:selector|locator)?\s*(.*)/i))) return `Chờ ${humanLocator(m[1])} xuất hiện`;
+  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Mở màn hình \`${m[1]}\``;
+  if (/^Reload/i.test(t)) return "Tải lại trang (F5)";
+  if ((m = t.match(/^Click\s+(.*)/i))) return `Bấm vào ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Fill\s+"(.*?)"\s+(.*)$/i))) return `Nhập "${m[1]}" vào ${describeTarget(m[2]).vi}`;
+  if ((m = t.match(/^Fill\s+(.*)/i))) return `Xoá nội dung ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Hover\s+(.*)/i))) return `Rê chuột vào ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Press sequentially\s+"(.*?)"/i)) || (m = t.match(/^Type\s+"(.*?)"/i))) return `Gõ "${m[1]}"`;
+  if ((m = t.match(/^Press\s+"?(.*?)"?\s*$/i))) return `Nhấn phím ${m[1]}`;
+  if ((m = t.match(/^Check\s+(.*)/i))) return `Tích chọn ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Uncheck\s+(.*)/i))) return `Bỏ tích ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Select\s+(.*)/i))) return `Chọn ${describeTarget(m[1]).vi}`;
+  if ((m = t.match(/^Wait for (?:response|request)/i))) return null; // nhiễu: bước kế tiếp đã nói rõ thao tác
+  if ((m = t.match(/^Wait for (?:selector|locator)?\s*(.*)/i))) return `Chờ ${describeTarget(m[1]).vi} xuất hiện`;
+
   if ((m = t.match(/^Expect "(\w+)"(?:\s*(.*))?/))) {
-    const what = {
-      toBeVisible: "hiển thị", toBeHidden: "ẩn", toHaveCount: "có đúng số lượng", toHaveText: "có đúng chữ",
-      toContainText: "chứa chữ", toHaveValue: "có đúng giá trị", toBeEnabled: "bật (click được)", toBeDisabled: "bị khoá",
-      toBeChecked: "được tích", toHaveURL: "đúng địa chỉ URL", toHaveAttribute: "có đúng thuộc tính", toBeEmpty: "rỗng",
-      toHaveClass: "có đúng class", toBeAttached: "tồn tại trên trang",
-      toEqual: "so sánh kết quả thực tế với mong đợi", toBe: "so sánh kết quả thực tế với mong đợi",
-      toMatchObject: "so sánh kết quả thực tế với mong đợi", toContain: "kết quả có chứa giá trị mong đợi",
-      toBeGreaterThan: "giá trị lớn hơn mong đợi", toMatch: "kết quả khớp mẫu mong đợi",
-    }[m[1]] || m[1];
-    return `Kiểm tra: ${what}${m[2] ? " " + humanLocator(m[2]) : ""}`;
+    // Chỉ giữ các kiểm tra QA hiểu được; bước kiểm tra bị lỗi sẽ được thay bằng phần "Lỗi" bên trên
+    const target = m[2] ? describeTarget(m[2]).vi : "";
+    if (m[1] === "toBeVisible") return `Kiểm tra: thấy ${target}`;
+    if (m[1] === "toBeHidden") return `Kiểm tra: không còn thấy ${target}`;
+    if (m[1] === "toHaveText" || m[1] === "toContainText") return `Kiểm tra: ${target} có đúng chữ mong đợi`;
+    if (m[1] === "toHaveURL") return "Kiểm tra: đúng địa chỉ màn hình mong đợi";
+    if (m[1] === "toBeEnabled") return `Kiểm tra: ${target} bấm được`;
+    if (m[1] === "toBeDisabled") return `Kiểm tra: ${target} bị khoá (không bấm được)`;
+    return null; // toHaveCount, toEqual, toBe... quá kỹ thuật
   }
   if (step.category === "test.step") return `**${t}**`;
-  if (step.category === "pw:api" || step.category === "expect") return t.length > 140 ? t.slice(0, 137) + "..." : t;
   return null;
 }
 
-// Duyệt cây step theo thứ tự thời gian, bỏ trùng liên tiếp
+// Duyệt cây step theo thứ tự thời gian. Mỗi phần tử: { text, err, placeholder }
+//   err = bước thật (pw:api / expect) có lỗi; placeholder = bước lỗi nhưng không dịch được (vd expect(...).toEqual)
 function flattenSteps(steps, out = []) {
   for (const s of steps || []) {
     const text = humanizeStep(s);
-    if (text) out.push({ text, failed: !!s.error });
+    const leaf = s.category === "pw:api" || s.category === "expect"; // bước thật; test.step / hook chỉ là khung bọc
+    const err = !!s.error && leaf;
+    if (text) out.push({ text, err });
+    else if (err) out.push({ text: "Bước kiểm tra này bị lỗi (xem phần \"Lỗi\" ở trên: mong đợi khác thực tế)", err, placeholder: true });
     // bước con của pw:api (log nội bộ) không cần; chỉ đi sâu vào hook / test.step / hàm bọc
-    if (s.steps && s.steps.length && s.category !== "pw:api" && s.category !== "expect") flattenSteps(s.steps, out);
+    if (s.steps && s.steps.length && !leaf) flattenSteps(s.steps, out);
   }
   return out;
 }
 
 function stepsOf(result) {
   const flat = flattenSteps(result.steps);
-  const dedup = [];
-  for (const s of flat) {
-    const last = dedup[dedup.length - 1];
-    if (last && last.text === s.text) continue;
-    dedup.push(s);
-  }
-  const failedAt = dedup.findIndex((x) => x.failed);
-  const upToFail = failedAt >= 0 ? dedup.slice(0, failedAt + 1) : dedup; // bỏ các bước dọn dẹp sau chỗ lỗi
-  return upToFail.slice(-MAX_STEPS);
+  // Bước gây fail test là bước lỗi CUỐI CÙNG; các bước lỗi ở giữa là lỗi đã được test bắt lại (catch) nên bỏ qua
+  let lastErr = -1;
+  flat.forEach((x, i) => { if (x.err) lastErr = i; });
+  const kept = [];
+  flat.forEach((x, i) => {
+    if (lastErr >= 0 && i > lastErr) return; // bỏ các bước dọn dẹp sau chỗ lỗi
+    if (x.placeholder && i !== lastErr) return; // bỏ bước lỗi đã bị bắt lại
+    const last = kept[kept.length - 1];
+    if (last && last.text === x.text) return; // bỏ trùng liên tiếp
+    kept.push({ text: x.text, failed: i === lastErr });
+  });
+  return kept.slice(-MAX_STEPS);
 }
 
 // ---------------------------------------------------------------------------
