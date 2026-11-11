@@ -24,6 +24,11 @@ npm run test:ui:other          // player, download_history, user, user_menu
 npm run test:ui                // full (tất cả nhóm trên)
 // Chạy 1 file: npm run test:ui -- tests/report_alert.spec.js
 
+// Báo cáo test lỗi cho QA: sau mỗi lần chạy, mở test-results/failures.md
+// (gom theo loại: lỗi app đã biết / sai kết quả / timeout / mạng rớt; mỗi lỗi có mong đợi vs thực tế,
+//  các bước đã thực hiện, ảnh lúc fail và lệnh chạy lại). Code: tests/helpers/failures-reporter.js
+// Test lỗi app đã biết được nhận diện qua comment "LỖI ỨNG DỤNG ĐÃ XÁC NHẬN" ngay phía trên test trong spec.
+
 // Thời gian từng test được ghi vào test-results/timings.json sau mỗi lần chạy (reporter json).
 // Liệt kê 15 file chạy lâu nhất của lần chạy gần nhất:
 // node -e "const r=require('./test-results/timings.json'),m={};(function w(s){(s.specs||[]).forEach(p=>p.tests.forEach(t=>t.results.forEach(x=>m[p.file]=(m[p.file]||0)+x.duration)));(s.suites||[]).forEach(w)})(...r.suites.map(s=>s));Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,15).forEach(([f,d])=>console.log((d/60000).toFixed(1)+' phút (tổng thời gian test)',f))"

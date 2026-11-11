@@ -67,11 +67,15 @@ module.exports = defineConfig({
     ["list"],
     ["./tests/api/helpers/response-reporter.js"],
     ["json", { outputFile: "test-results/timings.json" }],
+    // Gom test lỗi vào test-results/failures.md cho QA đọc (loại lỗi, các bước, ảnh, lệnh chạy lại)
+    ["./tests/helpers/failures-reporter.js"],
   ],
   // expect(...) fail sau 10s (mặc định 5s) - test.setTimeout() trong spec vẫn giữ nguyên cho luồng dài.
   expect: { timeout: 10_000 },
   use: {
     baseURL: `https://${boDomain}/`,
+    // Chỉ chụp ảnh khi test fail (không tốn thời gian cho test pass) để đính vào test-results/failures.md
+    screenshot: "only-on-failure",
     // Mặc định click/fill/waitFor KHÔNG có giới hạn riêng nên khi locator sai phải chờ hết test timeout (90-240s).
     // Đặt giới hạn để thao tác kẹt fail sau 30s. Lưu ý: actionTimeout cũng là timeout MẶC ĐỊNH của
     // page.waitForResponse / waitForRequest (không truyền { timeout }) nên 15s làm nhiều test chờ API chậm fail oan.
