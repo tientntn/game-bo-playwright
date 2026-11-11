@@ -1,7 +1,14 @@
 {
   "scripts": {
     "test:api": "playwright test --project=api --workers=1",
-    "test:ui": "playwright test --project=setup --project=chromium"
+    "test:ui": "playwright test --project=setup --project=chromium --workers=4",
+    "test:ui:admin": "playwright test tests/admin_ --project=setup --project=chromium --workers=4",
+    "test:ui:game": "playwright test tests/game_ --project=setup --project=chromium --workers=4",
+    "test:ui:report": "playwright test tests/report_ --project=setup --project=chromium --workers=4",
+    "test:ui:house": "playwright test tests/house_ --project=setup --project=chromium --workers=4",
+    "test:ui:master-agent": "playwright test tests/master_agent_ --project=setup --project=chromium --workers=4",
+    "test:ui:agent": "playwright test tests/agent_ --project=setup --project=chromium --workers=4",
+    "test:ui:other": "playwright test tests/player tests/download_history tests/user --project=setup --project=chromium --workers=4"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"

@@ -61,7 +61,13 @@ module.exports = defineConfig({
   // Thêm response-reporter.js bên cạnh "list" mặc định - reporter này in ra terminal
   // toàn bộ request/response của các lần gọi apiPost() khi 1 test tests/api/* fail,
   // để dễ kiểm tra lỗi API mà không cần mở HTML report (xem tests/api/helpers/api-client.js).
-  reporter: [["list"], ["./tests/api/helpers/response-reporter.js"]],
+  // Thêm "json" ghi thời gian từng test vào test-results/timings.json để tìm test / file chậm
+  // (xem lệnh tổng hợp trong README, mục "Chạy test theo nhóm").
+  reporter: [
+    ["list"],
+    ["./tests/api/helpers/response-reporter.js"],
+    ["json", { outputFile: "test-results/timings.json" }],
+  ],
   // expect(...) fail sau 10s (mặc định 5s) - test.setTimeout() trong spec vẫn giữ nguyên cho luồng dài.
   expect: { timeout: 10_000 },
   use: {
