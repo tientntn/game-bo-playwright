@@ -26,12 +26,15 @@
 //  - Describe cuối "Create Agent (ghi dữ liệu thật)": tạo 1 agent tên "QA-AUTO-<timestamp>" bằng UI (gắn vào house / master agent
 //    đầu tiên trong dropdown) rồi DỌN bằng cách Deactivate (màn hình không có Delete nên không xoá được; agent QA-AUTO để lại ở trạng thái Inactive).
 //    afterEach kiểm tra mọi request ghi chỉ là agent/create đúng tên QA-AUTO và agent/update-status chỉ nhắm vào id vừa tạo.
+//  - Cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md): describe cuối chỉ chạy khi RUN_FULL_TESTS=true trong .env;
+//    mặc định false -> skip, không gửi request ghi nào và không tạo agent QA-AUTO.
 //  - Export tạo bản ghi ở Download History; nếu file cùng filter đã tồn tại thì hộp thoại "Download Now / Download New" hiện ra và
 //    test KHÔNG bấm Download New (tránh xoá file cũ).
 //  - Không hard-code dữ liệu: house / master agent / agent / currency / game category / id đều lấy từ response list và dropdown; id màn hình con
 //    lấy từ icon ở dòng.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1733,6 +1736,7 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
 // Tests: ghi dữ liệu THẬT (tạo agent QA-AUTO, rồi dọn bằng Deactivate)
 // ---------------------------------------------------------------------------
 test.describe("Agents > Create Agent (ghi dữ liệu thật)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
   test.describe.configure({ mode: "serial" });
 
   let writes;

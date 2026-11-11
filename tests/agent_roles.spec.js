@@ -23,7 +23,8 @@
 //  - Mọi describe trừ cuối là "chỉ đọc": request ghi (role/create, role/edit) bị chặn ở tầng mạng (route.abort); test kiểm tra payload / thông báo
 //    dùng route.fulfill trả response GIẢ (request KHÔNG tới server). afterEach so sánh chính xác request ghi bắt được (watchWrites) với danh sách
 //    được phép (allowedWrites). Bản ghi có sẵn của team chỉ bị thao tác bằng request GIẢ, không bao giờ bị ghi thật.
-//  - Describe cuối "CRUD (ghi dữ liệu thật)" chạy tuần tự, CHỈ thao tác trên 1 role QA (code bắt đầu bằng "QAAUTO", name "QA-AUTO-...") gắn với 1 agent QA
+//  - Describe cuối "CRUD (ghi dữ liệu thật)" được gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    RUN_FULL_TESTS=false (mặc định) -> cả nhóm bị skip, KHÔNG gửi request ghi nào; =true -> mới chạy. Nhóm này chạy tuần tự, CHỈ thao tác trên 1 role QA (code bắt đầu bằng "QAAUTO", name "QA-AUTO-...") gắn với 1 agent QA
 //    (agent có sẵn tên "QA Test Agent ..." - lấy từ danh sách role, không hard-code):
 //      * Màn hình KHÔNG có chức năng xoá role -> role QA KHÔNG dọn được bằng UI, nên test chỉ TẠO role QA khi chưa có role nào (tối đa 1 lần trong cả vòng đời),
 //        các lần chạy sau dùng lại role đó. Sửa tên / quyền xong luôn KHÔNG để lại thay đổi (khôi phục trong finally + afterAll).
@@ -33,6 +34,7 @@
 //  - Chưa kiểm chứng được bằng UI thật: toast của luồng tạo thành công (dùng response giả).
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1721,6 +1723,7 @@ test.describe("Agent > Agent Roles", () => {
 
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên role QA) =====
   test.describe("CRUD (ghi dữ liệu thật trên role QA, luôn khôi phục lại)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     let qa; // { id, name, code, chain } - role QA (code bắt đầu bằng QAAUTO); chain = { house, master, agent } (tên) của agent mà role thuộc về
