@@ -59,7 +59,7 @@ module.exports = defineConfig({
   // để dễ kiểm tra lỗi API mà không cần mở HTML report (xem tests/api/helpers/api-client.js).
   reporter: [["list"], ["./tests/api/helpers/response-reporter.js"]],
   use: {
-    baseURL: "https://dev-bo.royaledge.io/",
+    baseURL: `https://${boDomain}/`,
   },
   projects: [
     // 1. Dự án chuyên đi đăng nhập (Nếu bạn dùng file setup để xử lý logic khác)
