@@ -9,12 +9,25 @@
 // Cột "Game Name" hiển thị tối đa 4 chip game, phần còn lại gom thành chip "+ N ..." (bấm để mở rộng / thu gọn).
 //
 // Màn hình có các thao tác GHI dữ liệu thật: Add New (Submit), Update (Submit), Delete (Delete).
-// Test KHÔNG bấm Submit khi form hợp lệ, KHÔNG bấm nút Delete trong hộp thoại xác nhận: chỉ mở hộp thoại, kiểm tra nội dung,
-// kiểm tra validation khi để trống (form bị chặn nên không gửi request) rồi bấm Cancel / Close, và kiểm tra không có
-// request ghi dữ liệu nào được gửi đi (watchWrites + route chặn thêm 1 lớp bảo hiểm - request ghi nếu có vẫn bị ghi nhận
-// vào `writes` nên test sẽ fail nhưng dữ liệu thật không bị đổi).
+// Các describe trong "Game Recommendation > Recommendation Group" (nhóm 1-11) KHÔNG bấm Submit khi form hợp lệ, KHÔNG bấm
+// nút Delete trong hộp thoại xác nhận: chỉ mở hộp thoại, kiểm tra nội dung, kiểm tra validation khi để trống (form bị chặn
+// nên không gửi request) rồi bấm Cancel / Close, và kiểm tra không có request ghi dữ liệu nào được gửi đi (watchWrites +
+// route chặn thêm 1 lớp bảo hiểm - request ghi nếu có vẫn bị ghi nhận vào `writes` nên test sẽ fail nhưng dữ liệu thật
+// không bị đổi). Các test đó chạy ở mọi chế độ.
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính danh sách / response dropdown/game.
+//
+// RIÊNG describe cuối file "Tạo / sửa / xoá nhóm QA thật (cần RUN_FULL_TESTS=true)" GHI DỮ LIỆU THẬT:
+//  - Gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md): cờ false/không khai báo -> cả nhóm bị skip, không
+//    gửi request ghi nào; chỉ chạy khi RUN_FULL_TESTS=true. Lệnh ví dụ (PowerShell):
+//      $env:RUN_FULL_TESTS="true"; npx playwright test tests/game_recommendation_group.spec.js --project=setup --project=chromium -g "nhóm QA thật"
+//  - Chỉ thao tác trên nhóm do chính test tạo ra, tên "QA Group <Date.now()>" (isQaGroup kiểm tra tiền tố + dãy số trước khi xoá).
+//    Không đụng nhóm có sẵn của team. Luồng (serial): tạo (recommendation-group/create) -> sửa (/update: đổi tên + bỏ 1 game)
+//    -> xoá bằng icon Delete + xác nhận (/delete).
+//  - Dọn dẹp: test cuối xoá nhóm QA qua UI và kiểm tra nhóm biến mất; afterAll xoá nốt mọi nhóm QA còn sót (kể cả của lần
+//    chạy trước bị dừng giữa chừng) nếu test giữa chừng fail. Nhóm được xoá hẳn nên không để lại rác.
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
+const { buildStorageState } = require("./helpers/session");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -1193,5 +1206,216 @@ test.describe("Game Recommendation > Recommendation Group", () => {
     await expect(page.locator("#name")).toHaveValue(part);
     expect(await selectedGame(page)).toEqual([optionText(game)]);
     await expect(page.locator(".ant-pagination-options")).toContainText("20 / page");
+  });
+});
+
+// ===========================================================================
+// GHI DỮ LIỆU THẬT: tạo -> sửa -> xoá 1 nhóm QA (cần RUN_FULL_TESTS=true). Nằm NGOÀI describe ở trên vì describe đó chặn
+// (blockWrites) và kiểm tra không có request ghi nào.
+// ===========================================================================
+const isWriteTo = (action) => (r) =>
+  reqOf(r).method() === "POST" && reqOf(r).url().endsWith(`/recommendation-group/${action}`);
+const isCreate = isWriteTo("create");
+const isUpdate = isWriteTo("update");
+const isDelete = isWriteTo("delete");
+
+// Tên nhóm QA do test tạo: chỉ chữ / số / khoảng trắng (form không cho dấu _), dài 3-50 ký tự
+const QA_PREFIX = "QA Group";
+const isQaGroup = (g) => typeof g?.name === "string" && new RegExp(`^${QA_PREFIX} \\d{10,}( upd)?$`).test(g.name);
+
+// Xoá nhóm QA ở dòng i của danh sách đang hiển thị (g = phần tử response tương ứng). Từ chối xoá nhóm không phải QA.
+async function deleteQaRow(page, g, i) {
+  expect(isQaGroup(g), `Chỉ được xoá nhóm QA, không phải "${g.name}"`).toBe(true);
+  await expect(cellAt(page, i, COL.name)).toHaveText(norm(g.name));
+  await deleteIcon(page, i).click();
+  await expect(dialog(page)).toContainText(`Are you sure you want to delete group ${g.name}?`);
+  const [res] = await Promise.all([
+    page.waitForResponse(isDelete),
+    dialog(page).getByRole("button", { name: /Delete$/ }).click(),
+  ]);
+  expect(res.status()).toBe(200);
+  expect(JSON.parse(res.request().postData()).id).toBe(g.id);
+  const json = await res.json();
+  expect(json).toMatchObject({ status: "success", message: "Recommendation group deleted successfully" });
+  await expect(page.locator(".Toastify__toast").filter({ hasText: "Recommendation group deleted successfully" }).first()).toBeVisible();
+  await expect(dialog(page)).toBeHidden();
+  await settle(page);
+  return json;
+}
+
+// Xoá (qua UI) mọi nhóm QA khớp `term` đang có trên danh sách; trả về các nhóm đã xoá. Trang phải đã mở xong (openPage).
+async function deleteQaGroups(page, term) {
+  const deleted = [];
+  await fillFilter(page, "name", term);
+  for (let n = 0; n < 20; n++) {
+    const { json } = await search(page);
+    const i = json.data.list.findIndex(isQaGroup);
+    if (i < 0) break;
+    await deleteQaRow(page, json.data.list[i], i);
+    deleted.push(json.data.list[i]);
+  }
+  return deleted;
+}
+
+test.describe("Tạo / sửa / xoá nhóm QA thật (cần RUN_FULL_TESTS=true)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+  test.describe.configure({ mode: "serial" });
+
+  const qaName = `${QA_PREFIX} ${Date.now()}`;
+  const qaNameUpdated = `${qaName} upd`;
+  let qaId = null; // id nhóm QA do request create trả về
+  let needCleanup = false; // true từ lúc bấm Submit tạo tới khi test "Xoá" xác nhận đã xoá xong
+
+  let writes;
+  let gamesLoaded;
+  const games = async () => (await (await gamesLoaded).json()).data;
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("__recommendation_group_spec_cleared")) return;
+      for (const k of Object.keys(localStorage)) {
+        if (/recommendation-group_(filter|page_size)$|^sorter__game-recommendation_recommendation-group$/.test(k)) {
+          localStorage.removeItem(k);
+        }
+      }
+      sessionStorage.setItem("__recommendation_group_spec_cleared", "1");
+    });
+    writes = watchWrites(page);
+    gamesLoaded = page.waitForResponse(isGameDropdown, { timeout: 60000 });
+    gamesLoaded.catch(() => {});
+    await openPage(page);
+  });
+
+  // Dù test giữa chừng fail vẫn xoá nhóm QA còn sót (kể cả nhóm QA của lần chạy trước bị dừng giữa chừng)
+  test.afterAll(async ({ browser, baseURL }) => {
+    if (!needCleanup) return;
+    test.setTimeout(180000);
+    const context = await browser.newContext({ baseURL, storageState: buildStorageState(), viewport: { width: 1920, height: 1080 } });
+    try {
+      const page = await context.newPage();
+      await openPage(page);
+      await deleteQaGroups(page, QA_PREFIX);
+      await page.close();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("Tạo nhóm: Add New -> nhập tên QA + chọn 2 game đầu -> Submit gửi create thành công, nhóm xuất hiện đúng 1 dòng", async ({ page }) => {
+    const data = await games();
+    test.skip(data.length < 2, "Cần ít nhất 2 game");
+    const [g1, g2] = data;
+    const chosen = [g1.value, g2.value];
+
+    await addBtn(page).click();
+    await nameInput(page).fill(qaName);
+    for (const id of chosen) await dialog(page).locator(`tr[data-row-key="${id}"] input`).click();
+    await expect(selectedCountText(page)).toHaveText(`2 of ${data.length} selected`);
+    await expect(nameErrors(page)).toHaveCount(0);
+    await expect(gameError(page)).toHaveCount(0);
+
+    needCleanup = true; // từ đây có thể đã tạo nhóm QA -> afterAll dọn nếu test sau fail
+    const [res] = await Promise.all([page.waitForResponse(isCreate), submitBtn(page).click()]);
+    expect(res.status()).toBe(200);
+    const body = JSON.parse(res.request().postData());
+    expect(body.name).toBe(qaName);
+    expect([...body.gameIds].sort((a, b) => a - b)).toEqual([...chosen].sort((a, b) => a - b));
+    const json = await res.json();
+    expect(json).toMatchObject({
+      status: "success",
+      messageCode: "CREATE_RECOMMENDATION_GROUP_SUCCESS",
+      message: "Recommendation group created successfully",
+    });
+    expect(typeof json.data.id).toBe("number");
+    qaId = json.data.id;
+
+    await expect(page.locator(".Toastify__toast").filter({ hasText: "Recommendation group created successfully" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    await settle(page);
+
+    // Tìm lại theo Group Name: đúng 1 nhóm với No. of Game = 2 và đúng game đã chọn
+    await fillFilter(page, "name", qaName);
+    const found = await search(page);
+    expect(found.body.filters.name).toBe(qaName);
+    expect(found.json.data.totalCount).toBe(1);
+    const g = found.json.data.list[0];
+    expect(g).toMatchObject({ id: qaId, name: qaName, totalGame: 2 });
+    expect(g.games.map((x) => x.id).sort((a, b) => a - b)).toEqual([...chosen].sort((a, b) => a - b));
+    await expect(rows(page)).toHaveCount(1);
+    await expect(cellAt(page, 0, COL.name)).toHaveText(qaName);
+    await expect(cellAt(page, 0, COL.total)).toHaveText("2");
+    expect((await chipInfo(page, 0)).games).toEqual(g.games.map((x) => norm(x.name)));
+    await expect(summary(page)).toHaveText("Showing 1 - 1 of 1 records");
+
+    // Chỉ gửi đúng 1 request ghi: create
+    expect(writes.map((u) => u.replace(/^.*\/recommendation-group\//, ""))).toEqual(["create"]);
+  });
+
+  test("Sửa nhóm QA: đổi tên + bỏ chọn 1 game -> Submit gửi update thành công, danh sách cập nhật", async ({ page }) => {
+    test.skip(qaId === null, "Chưa tạo được nhóm QA ở test trước");
+    const data = await games();
+    const [g1, g2] = data;
+
+    await fillFilter(page, "name", qaName);
+    const before = await search(page);
+    expect(before.json.data.list.map((x) => x.id)).toEqual([qaId]);
+    expect(isQaGroup(before.json.data.list[0])).toBe(true);
+
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), editIcon(page, 0).click()]);
+    expect(JSON.parse(viewRes.request().postData()).id).toBe(qaId);
+    await expect(dialog(page)).toContainText(`Edit Recommendation Group ${qaName}`);
+    await expect(nameInput(page)).toHaveValue(qaName);
+    await expect(selectedCountText(page)).toHaveText(`2 of ${data.length} selected`);
+    await expect
+      .poll(async () => (await checkedKeys(page)).sort(), { message: "game tích sẵn phải là 2 game đã tạo" })
+      .toEqual([String(g1.value), String(g2.value)].sort());
+
+    await nameInput(page).fill(qaNameUpdated);
+    await dialog(page).locator(`tr[data-row-key="${g2.value}"] input`).click(); // bỏ game thứ 2
+    await expect(selectedCountText(page)).toHaveText(`1 of ${data.length} selected`);
+
+    const [res] = await Promise.all([page.waitForResponse(isUpdate), submitBtn(page).click()]);
+    expect(res.status()).toBe(200);
+    expect(JSON.parse(res.request().postData())).toMatchObject({ id: qaId, name: qaNameUpdated, gameIds: [g1.value] });
+    expect(await res.json()).toMatchObject({
+      status: "success",
+      messageCode: "UPDATE_RECOMMENDATION_GROUP_SUCCESS",
+      message: "Recommendation group updated successfully",
+    });
+    await expect(page.locator(".Toastify__toast").filter({ hasText: "Recommendation group updated successfully" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    await settle(page);
+
+    // Bộ lọc vẫn là tên cũ (là chuỗi con của tên mới) -> nhóm vẫn nằm trong danh sách với tên mới + 1 game
+    const after = await search(page);
+    expect(after.json.data.list.map((x) => x.id)).toEqual([qaId]);
+    expect(after.json.data.list[0]).toMatchObject({ name: qaNameUpdated, totalGame: 1 });
+    expect(after.json.data.list[0].games.map((x) => x.id)).toEqual([g1.value]);
+    await expect(cellAt(page, 0, COL.name)).toHaveText(qaNameUpdated);
+    await expect(cellAt(page, 0, COL.total)).toHaveText("1");
+
+    expect(writes.map((u) => u.replace(/^.*\/recommendation-group\//, ""))).toEqual(["update"]);
+  });
+
+  test("Xoá nhóm QA (dọn dẹp): icon Delete -> xác nhận đúng tên nhóm -> Delete gửi delete thành công, nhóm biến mất", async ({ page }) => {
+    test.skip(qaId === null, "Chưa tạo được nhóm QA ở test trước");
+
+    // Lọc theo tiền tố QA, xoá qua UI (kiểm tra tên trong hộp thoại xác nhận) -> xoá cả nhóm QA cũ còn sót (nếu có)
+    const deleted = await deleteQaGroups(page, QA_PREFIX);
+    expect(deleted.map((g) => g.id)).toContain(qaId);
+    needCleanup = false;
+
+    // Danh sách không còn nhóm nào khớp tên QA
+    await fillFilter(page, "name", qaNameUpdated);
+    const { json } = await search(page);
+    expect(json.data.totalCount).toBe(0);
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByText("There are no entries found").first()).toBeVisible();
+
+    // Không còn nhóm QA nào sót
+    await fillFilter(page, "name", QA_PREFIX);
+    const left = (await search(page)).json.data.list.filter(isQaGroup);
+    expect(left.map((g) => g.name), "Còn nhóm QA sót lại trên danh sách").toEqual([]);
+    expect([...new Set(writes.map((u) => u.replace(/^.*\/recommendation-group\//, "")))]).toEqual(["delete"]);
   });
 });
