@@ -7,12 +7,25 @@
 // Export tải thẳng file CSV về trình duyệt (không tạo bản ghi ở Download History).
 //
 // Màn hình có các thao tác GHI dữ liệu thật: Create / Update (nút Save), Activate / Deactivate (từng dòng và hàng loạt).
-// Test KHÔNG bấm Save, KHÔNG bấm Activate / Deactivate / icon toggle ở từng dòng: chỉ mở hộp thoại, kiểm tra nội dung,
-// kiểm tra validation khi để trống (form bị chặn nên không gửi request) rồi bấm Cancel, và kiểm tra không có
-// request ghi dữ liệu nào được gửi đi.
+//
+// Cờ RUN_FULL_TESTS (xem RUN_FULL_TESTS.md và tests/helpers/flags.js, đặt trong .env):
+//   - RUN_FULL_TESTS=false (mặc định): CHỈ chạy test không ghi dữ liệu. Test ở nhóm "Tạo Game Category thật và dọn dẹp"
+//     (cuối file) bị SKIP. Các test còn lại KHÔNG bấm Save, KHÔNG bấm Activate / Deactivate / icon toggle ở từng dòng:
+//     chỉ mở hộp thoại, kiểm tra nội dung, kiểm tra validation khi để trống (form bị chặn nên không gửi request)
+//     rồi bấm Cancel, và kiểm tra không có request ghi dữ liệu nào được gửi đi.
+//   - RUN_FULL_TESTS=true: chạy thêm nhóm "Tạo Game Category thật và dọn dẹp": bấm Save tạo 1 category QA
+//     (Name `QA-<số>`, Code `QA_<số>`) rồi kiểm tra request / response / thông báo / dòng mới ở danh sách.
+//     Test chỉ thao tác trên bản ghi do CHÍNH nó vừa tạo (có kiểm tra isQa trước khi Deactivate), không đụng bản ghi có sẵn.
+//
+// DỌN DẸP: màn hình này KHÔNG có chức năng xoá category (chỉ có Activate / Deactivate), nên không thể xoá bản ghi QA.
+// Test Deactivate bản ghi QA vừa tạo ở cuối test (cả khi test fail giữa chừng, trong finally). Mỗi lần chạy với
+// RUN_FULL_TESTS=true để lại 1 category `QA-<số>` ở trạng thái Inactive trên dev (không hiện ở các màn hình dùng
+// category Active); cần xoá hẳn thì nhờ backend / DB.
+//
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính dòng đầu tiên của danh sách.
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -830,5 +843,131 @@ test.describe("Games > Game Categories", () => {
     await openPage(page); // reload
     await expect(page.locator("#categoryName")).toHaveValue("qa");
     expect(await selectedTitles(page, "status")).toEqual(["Active"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test GHI dữ liệu thật (cần RUN_FULL_TESTS=true) - tách khỏi describe chính vì describe chính cấm mọi request ghi
+// ---------------------------------------------------------------------------
+// Chỉ bản ghi do chính test tạo (Name `QA-<số>`, Code `QA_<số>`) mới được Deactivate
+const isQaCategory = (name, code) => /^QA-\d+$/.test(name) && /^QA_\d+$/.test(code);
+
+// Deactivate category QA (tìm theo Code) trên bảng hiện tại; bỏ qua nếu không còn Active.
+// Trả về request body của update_status, hoặc null nếu không phải thao tác nào.
+async function deactivateQaCategory(page, code) {
+  const row = rows(page).filter({ hasText: code });
+  if ((await row.count()) === 0) return null;
+  const cell = (col) => row.first().locator("td").nth(HEADERS.indexOf(col));
+  expect(
+    isQaCategory(norm(await cell("Name").innerText()), norm(await cell("Code").innerText())),
+    "Chỉ được Deactivate category QA do chính test tạo",
+  ).toBe(true);
+  if (norm(await cell("Status").innerText()) !== "Active") return null;
+
+  await row.first().locator("td").last().locator("svg").nth(1).click();
+  await expect(dialog(page)).toContainText("Deactivate this game category?");
+  const [req] = await Promise.all([
+    page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/game/game_category/update_status")),
+    dialog(page).getByRole("button", { name: /Deactivate$/ }).click(),
+  ]);
+  const res = await req.response();
+  expect(res.status()).toBe(200);
+  await expect(dialog(page)).toBeHidden();
+  await waitTableIdle(page);
+  await expect(cell("Status")).toHaveText("Inactive");
+  return JSON.parse(req.postData());
+}
+
+test.describe("Tạo Game Category thật và dọn dẹp (cần RUN_FULL_TESTS=true)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+
+  let writes;
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("__game_category_spec_cleared")) return;
+      for (const k of Object.keys(localStorage)) {
+        if (/game-category_filter$/.test(k)) localStorage.removeItem(k);
+      }
+      sessionStorage.setItem("__game_category_spec_cleared", "1");
+    });
+    writes = watchWrites(page);
+    await openPage(page);
+  });
+
+  test("Submit tạo category QA: gửi request create, báo thành công, dòng mới hiện ở danh sách, rồi Deactivate dọn dẹp", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const name = `QA-${stamp}`;
+    const code = `QA_${stamp}`;
+    const rate = "55.5";
+    let cleaned = false;
+
+    try {
+      await addBtn(page).click();
+      await expect(dialog(page)).toContainText("Create Game Category");
+      await dialog(page).locator("#name").fill(name);
+      await dialog(page).locator("#effectiveTurnoverRate").fill(rate);
+      // Code mới không trùng: validate_code trả SUCCESS và form không báo lỗi
+      const [validated] = await Promise.all([
+        page.waitForResponse((r) => reqOf(r).method() === "POST" && r.url().endsWith("/game/game_category/validate_code")),
+        (async () => {
+          await dialog(page).locator("#code").fill(code);
+          await dialog(page).locator("#code").blur();
+        })(),
+      ]);
+      expect((await validated.json()).messageCode).toBe("SUCCESS");
+      await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(0);
+      // Status mặc định Active
+      await expect(dialog(page).locator('input[type="radio"][value="1"]')).toBeChecked();
+      expect(writes, "Chưa bấm Save thì chưa có request ghi").toEqual([]);
+
+      // Save -> request create, rồi bảng được tải lại
+      const [req, listRes] = await Promise.all([
+        page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/game/game_category/create")),
+        page.waitForResponse(isList),
+        dialog(page).getByRole("button", { name: /Save$/ }).click(),
+      ]);
+      expect(JSON.parse(req.postData())).toMatchObject({ name, code, status: 1, effectiveTurnoverRate: rate });
+      const res = await req.response();
+      expect(res.status()).toBe(200);
+      expect(await res.json()).toMatchObject({ status: "success", messageCode: "CREATE_GAME_CATEGORY_SUCCESS" });
+      expect(writes.map((u) => u.split("/").pop())).toEqual(["create"]);
+
+      // Thông báo thành công, hộp thoại đóng
+      await expect(page.locator(".Toastify__toast").filter({ hasText: "Create Game Category Successfully" })).toBeVisible();
+      await expect(dialog(page)).toBeHidden();
+
+      // Dòng mới có trong response danh sách và trên bảng với đúng Name / Code / Rate / Status
+      const item = (await listRes.json()).data.list.find((c) => c.code === code);
+      expect(item, "Category vừa tạo phải có trong response danh sách").toBeTruthy();
+      expect(item).toMatchObject({ name, code, status: 1 });
+      expect(item.effectiveTurnoverRate).toBeCloseTo(Number(rate), 6);
+      await waitTableIdle(page);
+
+      const row = rows(page).filter({ hasText: code });
+      await expect(row).toHaveCount(1);
+      const rec = (await tableRecords(page)).find((r) => r["Code"] === code);
+      expect(rec).toMatchObject({ ID: String(item.id), Name: name, Code: code, "Effective Turnover Rate": `${rate}%`, Status: "Active" });
+      // Mặc định id giảm dần nên category mới nhất nằm ở dòng đầu tiên
+      await expect(rowAt(page, 0)).toContainText(code);
+
+      // Dọn dẹp: Deactivate đúng category QA vừa tạo (hệ thống không có Delete)
+      const upd = await deactivateQaCategory(page, code);
+      cleaned = true;
+      expect(upd).toEqual(expect.objectContaining({ ids: [item.id], status: 0 }));
+      await expect(
+        page.locator(".Toastify__toast").filter({ hasText: "Game category status successfully updated" }),
+      ).toBeVisible();
+      expect(writes.map((u) => u.split("/").pop())).toEqual(["create", "update_status"]);
+    } finally {
+      // Phòng khi test fail giữa chừng sau khi đã tạo: tải lại và Deactivate để không để category QA ở trạng thái Active
+      // (nếu chưa tạo được thì không thấy dòng nào theo Code và hàm trả về null, không làm gì)
+      if (!cleaned) {
+        await openPage(page);
+        await deactivateQaCategory(page, code);
+      }
+    }
   });
 });

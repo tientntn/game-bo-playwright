@@ -88,7 +88,8 @@ module.exports = defineConfig({
           origins: [
             {
               origin: `https://${boDomain}`,
-              localStorage: sessionEntries,
+              // Bỏ sorter__*: cách sắp xếp đã lưu của từng màn hình (copy từ DevTools) làm trang không mở với sort mặc định
+              localStorage: sessionEntries.filter(({ name }) => !/^sorter__/i.test(name)),
             },
           ],
         },
