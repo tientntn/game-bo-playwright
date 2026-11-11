@@ -712,7 +712,9 @@ test.describe("Game Recommendation > Event Content", () => {
     test("Không có kết quả -> hiển thị 'There are no entries found'", async ({ page }) => {
       await fillFilter(page, "eventTitle", `khong-co-${Date.now()}`);
       const { json } = await search(page);
-      expect(json.data.totalCount).toBe(0);
+      // Khi không có bản ghi nào, response KHÔNG có `data` (undefined) -> không đọc json.data.totalCount trực tiếp
+      expect(json.data?.totalCount ?? 0).toBe(0);
+      expect(json.data?.list ?? []).toHaveLength(0);
       await expect(rows(page)).toHaveCount(0);
       await expect(page.getByText("There are no entries found").first()).toBeVisible();
     });

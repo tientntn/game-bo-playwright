@@ -1096,12 +1096,14 @@ test.describe("Master Agent > Users", () => {
       // HÀNH VI ĐÚNG (đã được user xác nhận): Reset khi đang ở trang 2 xoá filter nhưng giữ nguyên trang đang xem (xem house_entity).
       test("Reset khi đang ở trang 2 (có filter): xoá filter nhưng giữ nguyên trang 2", async ({ page }) => {
         test.skip((await totalOf(page)) <= 10, "Chỉ có 1 trang");
-        await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const { json: all } = await search(page);
         const h = uniqueByLabel(await houseList()).find((v) => norm(v.label) === norm(houseOf(all.data.list[0] ?? {}).name));
         test.skip(!h, "Không chọn được house để tạo filter");
         await selectOption(page, "houseIds", h.label);
-        await reloadBy(page, () => searchBtn(page).click());
+        // Search áp dụng filter (về trang 1) rồi mới sang trang 2, sau đó Reset
+        const filtered = await reloadFull(page, () => searchBtn(page).click());
+        test.skip(filtered.json.data.totalCount <= 10, "Filter House chỉ có 1 trang");
+        await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
         const bodies = await resetBodies(page);
         expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 2, filters: { sasEntityHierarchyId: [3] } });
         await expect(page.locator(".ant-pagination-item-active")).toHaveText("2");
