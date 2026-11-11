@@ -88,8 +88,11 @@ Biến môi trường của shell **ưu tiên hơn** `.env` (dotenv không ghi �
 | `tests/game_list.spec.js` (nhóm "Tạo game thật và dọn dẹp") | Có (agent playwright đang hoàn thiện) |
 | `tests/game_recommendation_group.spec.js` (nhóm "Tạo / sửa / xoá nhóm QA thật") | Có |
 | `tests/game_recommendation_event_content.spec.js` (nhóm "Tạo / sửa / xoá event content QA thật") | Có |
-| `tests/house_entity.spec.js` (nhóm "Houses > Create House (ghi dữ liệu thật)") | Có |
 | `tests/house_roles.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên role QA, luôn khôi phục lại)") | Có |
+| `tests/house_users.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên user QA, luôn khôi phục lại)") | Có |
+| `tests/house_entity.spec.js` (nhóm "Houses > Create House (ghi dữ liệu thật)") | Có |
+| `tests/master_agent_users.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên user QA, luôn khôi phục lại)") | Có |
+| `tests/master_agent_entity.spec.js` (nhóm "Master Agents > Create Master Agent (ghi dữ liệu thật)") | Có |
 | Các spec khác có ghi dữ liệu (vd `admin_currency.spec.js` describe "CRUD", user / roles / entity...) | **Chưa** - vẫn chạy bất kể cờ. Cần rà soát và gắn cờ nếu muốn `false` = hoàn toàn không tạo dữ liệu. |
 
 ## Lưu ý
