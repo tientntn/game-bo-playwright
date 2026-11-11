@@ -20,12 +20,15 @@
 //  - Mọi describe trừ cuối là "chỉ đọc": request ghi (ip-restrict-create / update / delete) bị chặn ở tầng mạng (route.abort); test kiểm tra payload / thông báo dùng
 //    route.fulfill trả response GIẢ (request KHÔNG tới server). afterEach so sánh chính xác request ghi bắt được (watchWrites) với danh sách được phép (allowedWrites).
 //    IP có sẵn của team (vd 0.0.0.0, 10.1.204.204...) chỉ bị thao tác bằng request GIẢ, không bao giờ bị ghi thật.
-//  - Describe cuối "CRUD (ghi dữ liệu thật)" chạy tuần tự, CHỈ thao tác trên IP QA do chính test tạo: IP ngẫu nhiên 10.<200-249>.x.x, remark "QAAUTO <timestamp>".
+//  - Describe cuối "CRUD (ghi dữ liệu thật)" được gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md):
+//    RUN_FULL_TESTS=false (mặc định) -> cả nhóm bị skip, KHÔNG gửi request ghi nào; =true -> mới chạy.
+//    Nhóm này chạy tuần tự, CHỈ thao tác trên IP QA do chính test tạo: IP ngẫu nhiên 10.<200-249>.x.x, remark "QAAUTO <timestamp>".
 //    Màn hình CÓ chức năng xoá nên mỗi test tự tạo IP QA rồi xoá bằng UI trong finally; afterAll quét thêm 1 lần các IP QA còn sót (chỉ các IP do chính lần chạy này tạo).
 //    afterEach kiểm tra mọi request ghi chỉ nhắm vào IP / id của bản ghi QA đã tạo.
 //  - Không hard-code dữ liệu: IP dùng cho test lấy từ response list.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -814,6 +817,7 @@ test.describe("Administration > Geofencing", () => {
 
   // ===== NHÓM GHI DỮ LIỆU THẬT (chỉ trên IP QA do chính test tạo, luôn xoá lại) =====
   test.describe("CRUD (ghi dữ liệu thật trên IP QA, luôn xoá lại)", () => {
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
     test.describe.configure({ mode: "serial" });
 
     const trackedIps = new Set(); // mọi IP QA do lần chạy này tạo (để afterAll quét nốt nếu test dừng giữa chừng)
