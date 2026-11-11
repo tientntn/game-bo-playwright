@@ -8,12 +8,24 @@
 // Export tải thẳng file CSV về trình duyệt (chỉ chứa các dòng của TRANG hiện tại, không tạo bản ghi ở Download History).
 //
 // Màn hình có các thao tác GHI dữ liệu thật: Create / Update (nút Confirm trong hộp thoại).
-// Test KHÔNG bấm Confirm khi form hợp lệ: chỉ mở hộp thoại, kiểm tra nội dung, kiểm tra validation khi để trống
-// trường bắt buộc (form bị chặn nên không gửi request) rồi bấm Cancel / Close, và kiểm tra không có request ghi dữ liệu
-// nào được gửi đi. validate_name chỉ kiểm tra trùng tên (không lưu gì) nên được coi là request đọc.
+// Nhóm test chính "Games > Game Sub Categories" KHÔNG bấm Confirm khi form hợp lệ: chỉ mở hộp thoại, kiểm tra nội dung,
+// kiểm tra validation khi để trống trường bắt buộc (form bị chặn nên không gửi request) rồi bấm Cancel / Close, và kiểm tra
+// không có request ghi dữ liệu nào được gửi đi. validate_name chỉ kiểm tra trùng tên (không lưu gì) nên được coi là request đọc.
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính dòng đầu tiên của danh sách / response dropdown.
+//
+// CỜ RUN_FULL_TESTS (tests/helpers/flags.js, đặt trong .env, ghi đè nhanh bằng biến môi trường):
+//   RUN_FULL_TESTS=false -> (mặc định) mọi test KHÔNG ghi dữ liệu vẫn chạy; nhóm "Tạo / sửa sub category thật (cần RUN_FULL_TESTS=true)"
+//                           ở cuối file bị SKIP, không gửi bất kỳ request ghi nào.
+//   RUN_FULL_TESTS=true  -> chạy thêm nhóm trên: bấm Confirm THẬT để tạo 1 sub category QA rồi đổi Name của chính bản ghi đó.
+//   Nhóm này nằm ở describe riêng (ngoài describe chính) nên không bị afterEach "không được có request ghi" của describe chính.
+//
+// Bản ghi QA do test tạo: tên "QA Sub <timestamp>" (sau khi test Update chạy: "QA Sub <timestamp> Upd"), Denom Type "Mini game",
+// Game Category lấy từ dropdown/gamecategory. Test chỉ sửa bản ghi có tên khớp isQa(). Mỗi lần chạy RUN_FULL_TESTS=true tạo đúng 1 bản ghi.
+// LƯU Ý KHÔNG DỌN ĐƯỢC: màn hình chỉ có Create / Update, không có Delete / Deactivate (không có icon, API chỉ có create / update /
+// list / view / validate_name) nên bản ghi "QA Sub ..." sẽ còn lại trên dev sau mỗi lần chạy full (tên dễ nhận biết để xoá tay / DB).
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -1129,5 +1141,175 @@ test.describe("Games > Game Sub Categories", () => {
     expect(await selectedTitles(page, "denomTypes")).toEqual([DENOM_TEXT[c.denomType]]);
     expect(await selectedTitles(page, "gameCategoryIds")).toEqual([cat.label]);
     await expect(page.locator(".ant-pagination-options")).toContainText("20 / page");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tạo / sửa sub category thật (ghi dữ liệu): chỉ chạy khi RUN_FULL_TESTS=true
+// Nằm ngoài describe chính để không bị afterEach "không được có request ghi" của describe đó.
+// ---------------------------------------------------------------------------
+const isCreate = (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/game_sub_category/create");
+const isUpdate = (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/game_sub_category/update");
+const toast = (page) => page.locator(".Toastify__toast");
+// Chỉ bản ghi do chính test tạo ("QA Sub <timestamp>" hoặc "QA Sub <timestamp> Upd") mới được sửa
+const isQa = (name) => /^QA Sub \d{10,}( Upd)?$/.test(norm(name));
+
+test.describe("Tạo / sửa sub category thật (cần RUN_FULL_TESTS=true)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+  // Các test phụ thuộc nhau (tạo -> tìm trong danh sách -> đổi Name)
+  test.describe.configure({ mode: "serial" });
+
+  const ts = Date.now();
+  // Bản ghi QA dùng chung cho cả nhóm; id / category được điền dần qua các test
+  const qa = { name: `QA Sub ${ts}`, newName: `QA Sub ${ts} Upd`, denom: "Mini game", created: false };
+  let writes;
+  let categoriesLoaded;
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("__game_sub_category_spec_cleared")) return;
+      for (const k of Object.keys(localStorage)) {
+        if (/game-sub-category_(filter|page_size)$|^sorter__game_game-sub-category$/.test(k)) localStorage.removeItem(k);
+      }
+      sessionStorage.setItem("__game_sub_category_spec_cleared", "1");
+    });
+    writes = watchWrites(page);
+    categoriesLoaded = page.waitForResponse(isCategoryDropdown, { timeout: 60000 });
+    categoriesLoaded.catch(() => {});
+    await openPage(page);
+  });
+
+  // Lọc theo Name rồi trả về { body, json } của lần Search
+  async function searchByName(page, name) {
+    await fillFilter(page, "name", name);
+    return search(page);
+  }
+
+  test("Create: nhập Name QA + chọn Denom Type + Game Category rồi Confirm -> tạo thành công (request / response, toast, đóng hộp thoại)", async ({ page }) => {
+    // Game Category lấy từ response dropdown/gamecategory (không hard-code); chọn trong số option đầu danh sách ảo, tên không trùng
+    const all = (await (await categoriesLoaded).json()).data;
+    const cat = all.slice(0, 8).find((c) => all.filter((x) => x.label === c.label).length === 1);
+    test.skip(!cat, "Không có Game Category nào để chọn");
+    qa.category = cat;
+
+    await addBtn(page).click();
+    await expect(dialog(page)).toContainText("Create Game Sub Category");
+    // validate_name cần có Denom Type nên chọn Denom Type / Game Category trước rồi mới nhập Name
+    await pickFormOption(page, "denomTypeId", qa.denom);
+    await pickFormOption(page, "gameCategoryId", cat.label);
+    const [vreq] = await Promise.all([page.waitForRequest(isValidateName), dialog(page).locator("#modalName").fill(qa.name)]);
+    expect(JSON.parse(vreq.postData())).toMatchObject({ name: qa.name, denomType: DENOM_CODE[qa.denom] });
+    expect((await (await vreq.response()).json()).messageCode).toBe("SUCCESS");
+    await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(0);
+
+    const [req, res] = await Promise.all([
+      page.waitForRequest(isCreate),
+      page.waitForResponse(isCreate),
+      dialog(page).getByRole("button", { name: /Confirm$/ }).click(),
+    ]);
+    const json = await res.json();
+    if (json.status === "success") qa.created = true;
+
+    // Request đúng dữ liệu đã nhập
+    expect(JSON.parse(req.postData())).toMatchObject({ name: qa.name, denomType: DENOM_CODE[qa.denom], gameCategoryId: cat.value });
+    // Response thành công
+    expect(res.status()).toBe(200);
+    expect(json.status).toBe("success");
+    expect(json.messageCode).toBe("CREATE_GAME_SUB_CATEGORY_SUCCESS");
+    // Toast thành công và hộp thoại đóng
+    await expect(toast(page).filter({ hasText: "Create Game Sub Category Successfully" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    // Chỉ gửi đúng 1 request ghi: create
+    expect(writes.map((u) => u.replace(/^.*\/game\//, ""))).toEqual(["game_sub_category/create"]);
+  });
+
+  test("Sub category QA mới có trong danh sách khi lọc theo Name, đúng Denom Type / Game Category", async ({ page }) => {
+    test.skip(!qa.created, "Chưa tạo được sub category QA ở test trước");
+    const { body, json } = await searchByName(page, qa.name);
+    expect(body.filters.name).toBe(qa.name);
+    const found = json.data.list.filter((c) => c.name === qa.name);
+    expect(found, `Không thấy sub category ${qa.name} trong danh sách`).toHaveLength(1);
+    const c = found[0];
+    expect(isQa(c.name)).toBe(true);
+    qa.id = c.id;
+    expect(c).toMatchObject({ denomType: DENOM_CODE[qa.denom], gameCategoryId: qa.category.value });
+
+    const rec = (await tableRecords(page)).find((r) => r["Game Sub Category Name"] === qa.name);
+    expect(rec, `Bảng không hiển thị ${qa.name}`).toBeTruthy();
+    expect(rec["ID"]).toBe(String(c.id));
+    expect(rec["Denom Type"]).toBe(qa.denom);
+    expect(rec["Game Category"]).toBe(norm(qa.category.label));
+    expect(writes).toEqual([]);
+  });
+
+  test("Tạo trùng Name (cùng Denom Type) bị chặn: validate_name trả DUPLICATE_GAME_SUB_CATEGORY_NAME và không gửi create", async ({ page }) => {
+    test.skip(!qa.id, "Chưa có sub category QA");
+    await addBtn(page).click();
+    await pickFormOption(page, "denomTypeId", qa.denom);
+    const [req] = await Promise.all([page.waitForRequest(isValidateName), dialog(page).locator("#modalName").fill(qa.name)]);
+    expect((await (await req.response()).json()).messageCode).toBe("DUPLICATE_GAME_SUB_CATEGORY_NAME");
+    await expect(dialog(page).locator(".ant-form-item-explain-error")).toContainText(MSG.duplicate);
+    await closeDialog(page); // KHÔNG Confirm
+    expect(writes).toEqual([]);
+  });
+
+  test("Update: chỉ đổi được Name của sub category QA; Confirm -> cập nhật thành công và danh sách hiển thị Name mới", async ({ page }) => {
+    test.skip(!qa.id, "Chưa có sub category QA");
+    const before = await searchByName(page, qa.name);
+    const c = before.json.data.list.find((x) => x.id === qa.id);
+    expect(c, `Không thấy sub category ${qa.name}`).toBeTruthy();
+    expect(isQa(c.name), `Không phải sub category QA: ${c.name}`).toBe(true); // an toàn: chỉ sửa bản ghi QA
+
+    const idx = (await columnValues(page, "ID")).indexOf(String(qa.id));
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const [view] = await Promise.all([page.waitForRequest(isView), editIcon(page, idx).click()]);
+    expect(JSON.parse(view.postData()).id).toBe(qa.id);
+    await expect(dialog(page)).toContainText("Update Game Sub Category");
+    await expect(dialog(page).locator("#modalName")).toHaveValue(qa.name);
+    await expect(dialog(page).locator("#denomTypeId")).toBeDisabled();
+    await expect(dialog(page).locator("#gameCategoryId")).toBeDisabled();
+
+    const [vreq] = await Promise.all([
+      page.waitForRequest(isValidateName),
+      dialog(page).locator("#modalName").fill(qa.newName),
+    ]);
+    expect(JSON.parse(vreq.postData())).toMatchObject({ name: qa.newName, denomType: DENOM_CODE[qa.denom] });
+    await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(0);
+
+    const [req, res] = await Promise.all([
+      page.waitForRequest(isUpdate),
+      page.waitForResponse(isUpdate),
+      dialog(page).getByRole("button", { name: /Confirm$/ }).click(),
+    ]);
+    const json = await res.json();
+    if (json.status === "success") qa.name = qa.newName; // các bước sau dùng Name mới
+
+    // Request đúng id + Name mới (Denom Type / Game Category giữ nguyên)
+    expect(JSON.parse(req.postData())).toMatchObject({
+      id: qa.id,
+      name: qa.newName,
+      denomType: DENOM_CODE[qa.denom],
+      gameCategoryId: qa.category.value,
+    });
+    expect(res.status()).toBe(200);
+    expect(json.status).toBe("success");
+    expect(json.messageCode).toBe("UPDATE_GAME_SUB_CATEGORY_SUCCESS");
+    await expect(toast(page).filter({ hasText: "Game sub category successfully updated" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    expect(writes.map((u) => u.replace(/^.*\/game\//, ""))).toEqual(["game_sub_category/update"]);
+
+    // Danh sách: Name mới xuất hiện, Denom Type / Game Category không đổi
+    const after = await searchByName(page, qa.newName);
+    const updated = after.json.data.list.find((x) => x.id === qa.id);
+    expect(updated, `Không thấy sub category ${qa.newName}`).toBeTruthy();
+    expect(updated).toMatchObject({
+      name: qa.newName,
+      denomType: DENOM_CODE[qa.denom],
+      gameCategoryId: qa.category.value,
+    });
+    const rec = (await tableRecords(page)).find((r) => r["ID"] === String(qa.id));
+    expect(rec["Game Sub Category Name"]).toBe(qa.newName);
+    expect(rec["Denom Type"]).toBe(qa.denom);
+    expect(rec["Game Category"]).toBe(norm(qa.category.label));
   });
 });

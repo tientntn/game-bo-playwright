@@ -11,15 +11,28 @@
 // nếu chọn cả 2 mà không cùng 1 game thì UI gửi ids=[-1] (không có kết quả).
 //
 // Màn hình có các thao tác GHI dữ liệu thật: Add New (Submit), Upload CSV rồi Submit, Delete 1 dòng, Bulk Delete.
-// Test KHÔNG bấm Submit, KHÔNG bấm Delete trong hộp thoại xác nhận: chỉ mở hộp thoại, kiểm tra nội dung, thao tác phía
-// trình duyệt (chọn game rồi Add vào bảng tạm, upload file CSV - UI đọc file tại chỗ, không gửi request) rồi bấm Cancel / Close.
-// Mọi test đều kiểm tra không có request ghi dữ liệu nào được gửi đi (watchWrites + route chặn thêm 1 lớp bảo hiểm - request
-// ghi nếu có vẫn bị ghi nhận vào `writes` nên test sẽ fail nhưng dữ liệu thật không bị đổi).
+// NHÓM CHÍNH (describe "Games > Effective Turnover Exclusion") KHÔNG bấm Submit, KHÔNG bấm Delete trong hộp thoại xác nhận:
+// chỉ mở hộp thoại, kiểm tra nội dung, thao tác phía trình duyệt (chọn game rồi Add vào bảng tạm, upload file CSV - UI đọc
+// file tại chỗ, không gửi request) rồi bấm Cancel / Close.
+// Mọi test của nhóm chính đều kiểm tra không có request ghi dữ liệu nào được gửi đi (watchWrites + route chặn thêm 1 lớp bảo
+// hiểm - request ghi nếu có vẫn bị ghi nhận vào `writes` nên test sẽ fail nhưng dữ liệu thật không bị đổi).
+//
+// CỜ RUN_FULL_TESTS (tests/helpers/flags.js, đặt trong .env, ghi đè nhanh bằng biến môi trường):
+//   RUN_FULL_TESTS=false -> (mặc định) nhóm cuối file "Thêm / xoá exclusion thật (cần RUN_FULL_TESTS=true)" bị SKIP, không gửi request ghi.
+//   RUN_FULL_TESTS=true  -> chạy thêm nhóm đó: bấm Submit THẬT (API .../effective-turnover-exclusion/add) để thêm exclusion cho
+//     1 game lấy từ dropdown "available" (không hard-code; game CHƯA bị loại, đã kiểm tra trước khi thêm), kiểm tra danh sách rồi
+//     xoá ĐÚNG exclusion vừa thêm bằng icon Delete của dòng (API .../remove, body ids=[id exclusion]) - gồm cả luồng Upload CSV + Submit.
+//     Không dùng Bulk Delete, không đụng exclusion có sẵn (xoá luôn lọc theo đúng game vừa thêm và kiểm tra chỉ còn 1 dòng).
+//     Dọn dẹp ở afterAll: nếu test fail giữa chừng mà exclusion của game đó còn tồn tại thì xoá nốt (cũng chỉ đúng game đó).
+//     Mỗi lần chạy thêm rồi xoá lại: số exclusion trở về như trước khi chạy. Nhóm này nằm NGOÀI describe chính nên không bị
+//     route chặn ghi và afterEach "không được gửi request ghi" của nhóm chính.
 // Export tạo job ở Download History (toast "Download is processing..."); nếu file cùng filter đã tồn tại thì hộp thoại
 // "already exist in download history" hiện ra - test KHÔNG bấm Download New, chỉ đóng hộp thoại.
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính danh sách / response dropdown.
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
+const { buildStorageState } = require("./helpers/session");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -1375,5 +1388,267 @@ test.describe("Games > Effective Turnover Exclusion", () => {
     expect(await selectedTitles(page, "gameCategoryId")).toEqual([cat.label]);
     await expect(filterEl(page, "name").locator(".ant-select-selection-item")).toHaveCount(0);
     await expect(page.locator(".ant-pagination-options")).toContainText("20 / page");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thêm / xoá exclusion thật (ghi dữ liệu): chỉ chạy khi RUN_FULL_TESTS=true
+// Nằm ngoài describe chính để không bị route chặn ghi và afterEach "không được có request ghi" của describe đó.
+// "Bản ghi QA" ở màn hình này = exclusion của 1 game lấy từ dropdown "available" (game có sẵn của team, CHƯA bị loại).
+// Test chỉ xoá đúng exclusion của game đó (lọc theo Code -> kiểm tra chỉ còn đúng 1 dòng khớp gameId -> icon Delete của dòng).
+// ---------------------------------------------------------------------------
+const isAddExclusion = (r) =>
+  reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/effective-turnover-exclusion/add");
+const isRemoveExclusion = (r) =>
+  reqOf(r).method() === "POST" && reqOf(r).url().endsWith("/game/effective-turnover-exclusion/remove");
+const toast = (page) => page.locator(".Toastify__toast");
+// Tên API ghi (bỏ phần đầu URL) để so sánh danh sách request ghi
+const writeName = (url) => url.replace(/^.*\/game\//, "");
+
+test.describe("Thêm / xoá exclusion thật (cần RUN_FULL_TESTS=true)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+  // Các test phụ thuộc nhau (thêm -> tìm trong danh sách -> xoá -> upload CSV -> xoá)
+  test.describe.configure({ mode: "serial" });
+
+  // Trạng thái dùng chung của nhóm:
+  //  game         : game được chọn từ dropdown available { value (id), code, label (tên) }
+  //  baseline     : danh sách exclusion có sẵn TRƯỚC khi thêm { total, gameIds }
+  //  mayExist     : đã gửi request add mà chưa xoá thành công -> afterAll phải dọn
+  const qa = { game: null, baseline: null, absentChecked: false, mayExist: false, id: null };
+  let writes;
+  let gamesLoaded;
+  let categoriesLoaded;
+  const games = async () => (await (await gamesLoaded).json()).data;
+  const categories = async () => (await (await categoriesLoaded).json()).data;
+
+  // Xoá bộ lọc / số dòng / sắp xếp đã lưu ở localStorage để luôn bắt đầu từ mặc định
+  const clearSavedState = () => {
+    if (sessionStorage.getItem("__effective_turnover_exclusion_spec_cleared")) return;
+    for (const k of Object.keys(localStorage)) {
+      if (/game_effective-turnover-exclusion_(filter|page_size)$|^sorter__game_effective-turnover-exclusion$/.test(k)) {
+        localStorage.removeItem(k);
+      }
+    }
+    sessionStorage.setItem("__effective_turnover_exclusion_spec_cleared", "1");
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(clearSavedState);
+    writes = watchWrites(page); // KHÔNG chặn ghi: nhóm này ghi thật
+    gamesLoaded = page.waitForResponse(isGameDropdown, { timeout: 60000 });
+    gamesLoaded.catch(() => {});
+    categoriesLoaded = page.waitForResponse(isCategoryDropdown, { timeout: 60000 });
+    categoriesLoaded.catch(() => {});
+    await openPage(page);
+  });
+
+  // Chọn game cần thêm: game đầu tiên trong danh sách available mà code / tên không trùng với game khác (để lọc chính xác được)
+  async function pickGame(available) {
+    const all = await games();
+    const unique = (g) =>
+      all.filter((x) => x.label === g.label).length === 1 && all.filter((x) => x.code === g.code).length === 1;
+    for (const a of available) {
+      const g = all.find((x) => x.value === a.value);
+      if (g && unique(g)) return { value: g.value, code: g.code, label: g.label };
+    }
+    return null;
+  }
+
+  // Lọc theo Code của game rồi xoá exclusion của ĐÚNG game đó bằng icon Delete của dòng (không dùng Bulk Delete).
+  // Chỉ xoá khi danh sách lọc theo gameId có đúng 1 dòng và dòng đó đúng gameId / code của game.
+  // allowMissing = true: không có exclusion thì trả về null (dùng khi dọn dẹp), ngược lại báo lỗi.
+  async function removeFromList(page, game, allowMissing = false) {
+    await selectOption(page, "code", game.code);
+    const { body, json } = await search(page);
+    expect(body.filters).toEqual({ ids: [game.value] });
+    const found = json.data.list.filter((x) => x.gameId === game.value);
+    if (allowMissing && found.length === 0) return null;
+    expect(found, `Phải có đúng 1 exclusion của game ${game.code}`).toHaveLength(1);
+    expect(json.data.list, "Danh sách lọc theo game chỉ được có 1 dòng").toHaveLength(1);
+    expect(found[0].gameCode).toBe(game.code);
+    await expect(rows(page)).toHaveCount(1);
+    await expect(cellAt(page, 0, COL.code)).toHaveText(game.code);
+
+    await deleteIcon(page, 0).click();
+    await expect(dialog(page)).toContainText(`Are you sure you want to delete ${norm(found[0].gameName)}?`);
+    const [req, res] = await Promise.all([
+      page.waitForRequest(isRemoveExclusion),
+      page.waitForResponse(isRemoveExclusion),
+      dialog(page).getByRole("button", { name: /Delete$/ }).click(),
+    ]);
+    const resJson = await res.json();
+    if (resJson.status === "success") qa.mayExist = false;
+    return { exclusion: found[0], req, res, json: resJson };
+  }
+
+  // Kiểm tra kết quả của 1 lần xoá exclusion (request / response / toast / hộp thoại / dòng biến mất)
+  async function expectRemoved(page, r) {
+    expect(JSON.parse(r.req.postData()).ids).toEqual([r.exclusion.id]);
+    expect(r.res.status()).toBe(200);
+    expect(r.json).toMatchObject({ status: "success", messageCode: "SUCCESS", data: { success: true } });
+    await expect(toast(page).filter({ hasText: "Success" }).first()).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByText("There are no entries found").first()).toBeVisible();
+  }
+
+  // Bấm Submit của hộp thoại Add New Exclusion (đã có game trong bảng tạm) và kiểm tra kết quả
+  async function submitAndExpect(page, game) {
+    await expect(submitBtn(page)).toBeEnabled();
+    qa.mayExist = true; // đặt trước khi bấm: nếu test fail sau bước này thì afterAll vẫn dọn
+    const [req, res] = await Promise.all([
+      page.waitForRequest(isAddExclusion),
+      page.waitForResponse(isAddExclusion),
+      submitBtn(page).click(),
+    ]);
+    const json = await res.json();
+    if (json.status !== "success") qa.mayExist = false;
+    // Request đúng game đã chọn
+    expect(JSON.parse(req.postData()).gameIds).toEqual([game.value]);
+    // Response thành công
+    expect(res.status()).toBe(200);
+    expect(json).toMatchObject({ status: "success", messageCode: "SUCCESS", data: { success: true } });
+    // Toast thành công và hộp thoại đóng
+    await expect(toast(page).filter({ hasText: "Success" }).first()).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    // Chỉ gửi đúng 1 request ghi: add
+    expect(writes.map(writeName)).toEqual(["effective-turnover-exclusion/add"]);
+  }
+
+  test("Add New + Submit: chọn 1 game available, Add vào bảng tạm rồi Submit -> thêm thành công (request / response, toast, đóng hộp thoại)", async ({ page }) => {
+    const before = (await search(page)).json.data;
+    const available = await openAdd(page);
+    const game = await pickGame(available);
+    test.skip(!game, "Không còn game nào có thể thêm (dropdown available trống hoặc tên / code bị trùng)");
+
+    // Game phải thực sự CHƯA bị loại trước khi thêm (dropdown available chỉ liệt kê game chưa bị loại)
+    expect(before.list.map((x) => x.gameId)).not.toContain(game.value);
+    qa.game = game;
+    qa.baseline = { total: before.totalCount, gameIds: before.list.map((x) => x.gameId) };
+    qa.absentChecked = true;
+
+    await pickAvailable(page, [game.code]);
+    await dialog(page).getByRole("button", { name: /Add$/ }).click();
+    await expect.poll(() => gridCodes(page)).toEqual([game.code]);
+    await submitAndExpect(page, game);
+  });
+
+  test("Exclusion mới có trong danh sách khi lọc theo Game Code và Game Name, đúng Game Name / Code / Category", async ({ page }) => {
+    test.skip(!qa.mayExist, "Chưa thêm được exclusion ở test trước");
+    const game = qa.game;
+
+    await selectOption(page, "code", game.code);
+    const byCode = await search(page);
+    expect(byCode.body.filters).toEqual({ ids: [game.value] });
+    const found = byCode.json.data.list.filter((x) => x.gameId === game.value);
+    expect(found, `Không thấy exclusion của game ${game.code}`).toHaveLength(1);
+    const e = found[0];
+    qa.id = e.id;
+    expect(byCode.json.data.totalCount).toBe(1);
+    expect(e.gameCode).toBe(game.code);
+    expect(norm(e.gameName)).toBe(norm(game.label));
+    expect((await categories()).map((c) => norm(c.label))).toContain(norm(e.gameCategory));
+
+    const recs = await tableRecords(page);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]["Game Name"]).toBe(norm(game.label));
+    expect(recs[0]["Game Code"]).toBe(game.code);
+    expect(recs[0]["Game Category"]).toBe(norm(e.gameCategory));
+    await expect(deleteIcon(page, 0)).toHaveCount(1);
+
+    // Lọc theo Game Name (bỏ filter Code trước) cũng ra đúng exclusion này
+    await resetBtn(page).click();
+    await selectOption(page, "name", game.label);
+    const byName = await search(page);
+    expect(byName.body.filters).toEqual({ ids: [game.value] });
+    expect(byName.json.data.list.map((x) => x.id)).toEqual([e.id]);
+    expect(await columnValues(page, "Game Code")).toEqual([game.code]);
+
+    // Bỏ lọc: tổng số exclusion hơn trước đúng 1
+    await resetBtn(page).click();
+    const all = await search(page);
+    expect(all.body.filters).toEqual({});
+    expect(all.json.data.totalCount).toBe(qa.baseline.total + 1);
+    expect(all.json.data.list.map((x) => x.id)).toContain(e.id);
+    expect(writes).toEqual([]);
+  });
+
+  test("Game vừa thêm không còn trong dropdown available của hộp thoại Add New", async ({ page }) => {
+    test.skip(!qa.mayExist, "Chưa thêm được exclusion ở test trước");
+    const available = await openAdd(page);
+    expect(available.map((g) => g.value)).not.toContain(qa.game.value);
+    // Ô chọn trong hộp thoại cũng không liệt kê code của game đó
+    await addSelect(page).click();
+    await page.keyboard.type(qa.game.code);
+    await expect(openOptions(page).filter({ hasText: exact(qa.game.code) })).toHaveCount(0);
+    await modalTitle(page).click();
+    await expect(openOptions(page)).toHaveCount(0);
+    await closeDialog(page);
+    expect(writes).toEqual([]);
+  });
+
+  test("Delete dọn dẹp: icon Delete của dòng -> xác nhận -> xoá đúng exclusion vừa thêm; dòng biến mất và game quay lại dropdown available", async ({ page }) => {
+    test.skip(!qa.mayExist, "Không có exclusion của test để xoá");
+    const game = qa.game;
+
+    const r = await removeFromList(page, game);
+    expect(r.exclusion.id).toBe(qa.id);
+    await expectRemoved(page, r);
+    expect(writes.map(writeName)).toEqual(["effective-turnover-exclusion/remove"]);
+
+    // Bỏ lọc: danh sách trở về đúng như trước khi thêm (các exclusion có sẵn không bị đổi)
+    await resetBtn(page).click();
+    const all = await search(page);
+    expect(all.json.data.totalCount).toBe(qa.baseline.total);
+    expect(all.json.data.list.map((x) => x.gameId)).toEqual(qa.baseline.gameIds);
+
+    // Tải lại trang rồi mở Add New: game quay lại danh sách available
+    await openPage(page);
+    const available = await openAdd(page);
+    expect(available.map((g) => g.value)).toContain(game.value);
+    await closeDialog(page);
+    expect(writes.map(writeName)).toEqual(["effective-turnover-exclusion/remove"]);
+  });
+
+  test("Upload CSV + Submit: file có game code của game available -> Back, game vào bảng -> Submit thêm thành công, rồi xoá lại đúng exclusion đó", async ({ page }) => {
+    test.skip(!qa.game || qa.mayExist, "Chưa có game / exclusion của test trước chưa được dọn");
+    const game = qa.game;
+    const available = await openAdd(page);
+    test.skip(!available.some((g) => g.value === game.value), "Game đã chọn không còn trong danh sách available");
+
+    await dialog(page).getByRole("button", { name: /Upload$/ }).click();
+    await expect(modalTitle(page)).toHaveText("Upload Game Exclusion");
+    await dialog(page).locator('input[type="file"]').setInputFiles(csvFile("qa_exclusion.csv", ["Game Code", game.code]));
+    const uploadList = dialog(page).locator(".ant-upload-list");
+    await expect(uploadList).toContainText("qa_exclusion.csv");
+    await expect(uploadList).not.toContainText("invalid");
+    await expect(uploadList).not.toContainText("Format is incorrect");
+    await dialog(page).getByRole("button", { name: /Back$/ }).click();
+    await expect(modalTitle(page)).toHaveText("Add New Exclusion");
+    await expect.poll(() => gridCodes(page)).toEqual([game.code]);
+    await submitAndExpect(page, game);
+
+    // Có trong danh sách rồi xoá đúng exclusion đó
+    const r = await removeFromList(page, game);
+    expect(r.exclusion.gameCode).toBe(game.code);
+    await expectRemoved(page, r);
+    expect(writes.map(writeName)).toEqual(["effective-turnover-exclusion/add", "effective-turnover-exclusion/remove"]);
+  });
+
+  // Dọn nốt khi test fail giữa chừng: chỉ xoá exclusion của ĐÚNG game mà nhóm này đã thêm (và đã xác nhận chưa bị loại trước đó)
+  test.afterAll(async ({ browser, baseURL }) => {
+    if (!qa.mayExist || !qa.game || !qa.absentChecked) return;
+    test.setTimeout(180000);
+    const context = await browser.newContext({ baseURL, storageState: buildStorageState(), viewport: { width: 1920, height: 1080 } });
+    try {
+      await context.addInitScript(clearSavedState);
+      const page = await context.newPage();
+      await openPage(page);
+      const r = await removeFromList(page, qa.game, true);
+      if (!r) qa.mayExist = false; // không còn exclusion nào của game này
+      await page.close();
+    } finally {
+      await context.close();
+    }
   });
 });
