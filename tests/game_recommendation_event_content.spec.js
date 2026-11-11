@@ -13,16 +13,34 @@
 //  - Không có checkbox chọn dòng / thao tác hàng loạt, KHÔNG có nút Export.
 //
 // Màn hình có các thao tác GHI dữ liệu thật: Add New (Submit), Update (Submit), Delete (Delete), sửa bản dịch trên dòng (icon Save).
-// Test KHÔNG bấm Submit khi form hợp lệ, KHÔNG bấm nút Delete trong hộp thoại xác nhận, KHÔNG bấm icon Save của bản dịch khi dữ liệu hợp lệ:
-// chỉ mở hộp thoại, kiểm tra nội dung, kiểm tra validation (form bị chặn nên không gửi request) rồi bấm Cancel / Close, và kiểm tra không có
-// request ghi dữ liệu nào được gửi đi (watchWrites + route chặn thêm 1 lớp bảo hiểm - request ghi nếu có vẫn bị ghi nhận vào `writes`
-// nên test sẽ fail nhưng dữ liệu thật không bị đổi). Việc thêm / xoá dòng sự kiện TRONG hộp thoại chỉ là thao tác trên form (chưa lưu).
+// Các describe trong "Game Recommendation > Event Content" (nhóm 1-12) KHÔNG bấm Submit khi form hợp lệ, KHÔNG bấm nút Delete trong hộp thoại
+// xác nhận, KHÔNG bấm icon Save của bản dịch khi dữ liệu hợp lệ: chỉ mở hộp thoại, kiểm tra nội dung, kiểm tra validation (form bị chặn nên
+// không gửi request) rồi bấm Cancel / Close, và kiểm tra không có request ghi dữ liệu nào được gửi đi (watchWrites + route chặn thêm 1 lớp
+// bảo hiểm - request ghi nếu có vẫn bị ghi nhận vào `writes` nên test sẽ fail nhưng dữ liệu thật không bị đổi). Việc thêm / xoá dòng sự kiện
+// TRONG hộp thoại chỉ là thao tác trên form (chưa lưu). Các test đó chạy ở mọi chế độ.
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính danh sách / response dropdown.
+//
+// RIÊNG describe cuối file "Tạo / sửa / xoá event content QA thật (cần RUN_FULL_TESTS=true)" GHI DỮ LIỆU THẬT:
+//  - Gắn cờ RUN_FULL_TESTS (tests/helpers/flags.js, xem RUN_FULL_TESTS.md): cờ false/không khai báo -> cả nhóm bị skip, không gửi request
+//    ghi nào; chỉ chạy khi RUN_FULL_TESTS=true. Lệnh ví dụ (PowerShell):
+//      $env:RUN_FULL_TESTS="true"; npx playwright test tests/game_recommendation_event_content.spec.js --project=setup --project=chromium -g "event content QA thật"
+//  - Add New BẮT BUỘC chọn Master Agent + Agent có sẵn. Mỗi Agent chỉ có 1 dòng Event Content và nút Delete xoá CẢ dòng (mọi sự kiện của agent)
+//    -> test chọn từ dữ liệu thật (API master_agent_dropdown / agent_dropdown, không hard-code) 1 Agent HIỆN CHƯA CÓ dòng Event Content nào
+//    (đối chiếu với toàn bộ danh sách ở 200 dòng / trang) nên KHÔNG đụng event của agent đã có dữ liệu. Agent đó chỉ bị gắn tạm event QA
+//    trong lúc chạy rồi dòng được xoá hẳn (Agent trở về trạng thái chưa có event content như trước).
+//  - Sự kiện QA có Title "QA-AUTO-<6 số>" (tối đa 20 ký tự) + Description "QA-AUTO desc ..."; isQaRow chỉ coi là dòng QA khi TOÀN BỘ sự kiện
+//    của dòng đều là sự kiện QA, và deleteQaRow từ chối xoá dòng không phải QA.
+//  - Luồng (serial): tạo (event-content/create) -> sửa (/update: đổi Title sự kiện cũ + thêm sự kiện thứ 2) -> xoá bằng icon Delete + xác nhận
+//    (/delete). Trước khi tạo, nếu còn dòng QA của lần chạy trước bị dừng giữa chừng thì xoá luôn.
+//  - Dọn dẹp: test cuối xoá dòng QA qua UI và kiểm tra dòng biến mất; afterAll xoá nốt mọi dòng QA còn sót nếu test giữa chừng fail.
+//    Dòng được xoá hẳn nên không để lại rác.
 //
 // GHI CHÚ ĐÃ KHÁM PHÁ (chưa được xác nhận là lỗi nên KHÔNG assert):
 //  - Sort cột Master Agent / Agent: UI gửi sortBy "masterAgentName" / "agentName" nhưng backend trả về đúng thứ tự mặc định (id giảm dần)
 //    cho cả asc lẫn desc -> test chỉ kiểm tra request và bảng khớp response, không kiểm tra thứ tự dữ liệu.
 const { test, expect } = require("@playwright/test");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
+const { buildStorageState } = require("./helpers/session");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -1524,5 +1542,303 @@ test.describe("Game Recommendation > Event Content", () => {
     expect(bodyOf(req).filters).toEqual({});
     await waitTableIdle(page);
     await expect(page.locator("#eventTitle")).toHaveValue("");
+  });
+});
+
+// ===========================================================================
+// GHI DỮ LIỆU THẬT: tạo -> sửa -> xoá 1 dòng Event Content QA (cần RUN_FULL_TESTS=true). Nằm NGOÀI describe ở trên vì describe đó
+// chặn (blockWrites) và kiểm tra không có request ghi nào.
+// ===========================================================================
+const isWriteTo = (action) => (r) => reqOf(r).method() === "POST" && reqOf(r).url().endsWith(`/event-content/${action}`);
+const isCreate = isWriteTo("create");
+const isUpdate = isWriteTo("update");
+const isDelete = isWriteTo("delete");
+const writeName = (u) => u.replace(/^.*\/event-content\//, "");
+
+// Title sự kiện QA: "QA-AUTO-<6 số>" (tối đa 20 ký tự), có thể kèm hậu tố " U" / " 2" ở bước sửa
+const QA_PREFIX = "QA-AUTO-";
+const isQaEvent = (e) => typeof e?.title === "string" && /^QA-AUTO-\d{6}( U| 2)?$/.test(e.title);
+// Dòng QA = TOÀN BỘ sự kiện của dòng đều là sự kiện QA (xoá dòng sẽ xoá cả event content của agent -> không được đụng dòng có sự kiện thật)
+const isQaRow = (x) => Array.isArray(x?.events) && x.events.length > 0 && x.events.every(isQaEvent);
+
+// Lấy TOÀN BỘ danh sách (200 dòng / trang) ở trạng thái không filter -> { body, json }. Gọi sau openPage.
+async function listAll(page) {
+  if ((await page.locator(".ant-pagination-options").innerText()).includes("200 / page")) return search(page);
+  await page.locator(".ant-pagination-options .ant-select").click();
+  return reloadFull(page, () => openOptions(page).filter({ hasText: "200 / page" }).click());
+}
+
+// Xoá dòng QA ở vị trí i của danh sách đang hiển thị (x = phần tử response tương ứng). Từ chối xoá dòng không phải QA.
+async function deleteQaRow(page, x, i) {
+  expect(isQaRow(x), `Chỉ được xoá dòng QA, không phải "${x.agentName}" (${x.events.map((e) => e.title).join(", ")})`).toBe(true);
+  await expect(cellAt(page, i, COL.agent)).toHaveText(norm(x.agentName));
+  await deleteIcon(page, i).click();
+  await expect(dialog(page)).toContainText(`Are you sure you want to delete ${x.agentName}?`);
+  const [res] = await Promise.all([
+    page.waitForResponse(isDelete),
+    dialog(page).getByRole("button", { name: /Delete$/ }).click(),
+  ]);
+  expect(res.status()).toBe(200);
+  expect(bodyOf(reqOf(res)).id).toBe(x.id);
+  const json = await res.json();
+  expect(json).toMatchObject({ status: "success", messageCode: "DELETE_EVENT_CONTENT_SUCCESS", message: "Event content deleted successfully" });
+  await expect(page.locator(".Toastify__toast").filter({ hasText: "Event content deleted successfully" }).first()).toBeVisible();
+  await expect(dialog(page)).toBeHidden();
+  await settle(page);
+  return json;
+}
+
+// Xoá (qua UI) mọi dòng QA đang có trên danh sách; trả về các dòng đã xoá. Trang phải đã mở xong (openPage).
+async function deleteQaRows(page) {
+  const deleted = [];
+  for (let n = 0; n < 20; n++) {
+    const { json } = await listAll(page);
+    const i = json.data.list.findIndex(isQaRow);
+    if (i < 0) break;
+    await deleteQaRow(page, json.data.list[i], i);
+    deleted.push(json.data.list[i]);
+  }
+  return deleted;
+}
+
+// Chọn Master Agent ở hộp thoại Add / Update (option chỉ hiện tên, dropdown chọn 1, tự đóng); trả về danh sách agent của master đó
+async function dlgPickMaster(page, m) {
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => isAgentDropdown(r) && /"masterAgentIds":\[\d+\]/.test(reqOf(r).postData() || "")),
+    (async () => {
+      await dlgMaster(page).click();
+      await page.keyboard.type(m.label);
+      await openOptions(page).filter({ hasText: exact(m.label) }).first().click();
+    })(),
+  ]);
+  return (await res.json()).data;
+}
+
+async function dlgPickAgent(page, a) {
+  await dlgAgent(page).click();
+  await page.keyboard.type(a.code);
+  await openOptions(page).filter({ hasText: exact(optionText(a)) }).first().click();
+  await expect(dlgAgent(page).locator(".ant-select-selection-item")).toHaveAttribute("title", optionText(a));
+}
+
+test.describe("Tạo / sửa / xoá event content QA thật (cần RUN_FULL_TESTS=true)", () => {
+  test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
+  test.describe.configure({ mode: "serial" });
+
+  const suffix = String(Date.now()).slice(-6);
+  const qaTitle = `${QA_PREFIX}${suffix}`; // 14 ký tự
+  const qaTitleUpdated = `${qaTitle} U`;
+  const qaTitle2 = `${qaTitle} 2`;
+  const qaDesc = `QA-AUTO desc ${Date.now()}`;
+  const qaDesc2 = "QA-AUTO desc 2";
+  let qaId = null; // id dòng Event Content do request create trả về
+  let qaMaster = null; // { value, code, label } master agent đã chọn
+  let qaAgent = null; // { value, code, label } agent chưa có dòng nào đã chọn
+  let needCleanup = false; // true từ lúc bấm Submit tạo tới khi test "Xoá" xác nhận đã xoá xong
+
+  let writes;
+  let mastersLoaded;
+  const masters = async () => (await (await mastersLoaded).json()).data;
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("__event_content_spec_cleared")) return;
+      for (const k of Object.keys(localStorage)) {
+        if (/game-recommendation_event-content_(filter|page_size)$|^sorter__game-recommendation_event-content$/.test(k)) {
+          localStorage.removeItem(k);
+        }
+      }
+      sessionStorage.setItem("__event_content_spec_cleared", "1");
+    });
+    writes = watchWrites(page);
+    mastersLoaded = page.waitForResponse(isMasterDropdown, { timeout: 60000 });
+    mastersLoaded.catch(() => {});
+    await openPage(page);
+  });
+
+  // Dù test giữa chừng fail vẫn xoá dòng QA còn sót (kể cả dòng QA của lần chạy trước bị dừng giữa chừng)
+  test.afterAll(async ({ browser, baseURL }) => {
+    if (!needCleanup) return;
+    test.setTimeout(180000);
+    const context = await browser.newContext({ baseURL, storageState: buildStorageState(), viewport: { width: 1920, height: 1080 } });
+    try {
+      const page = await context.newPage();
+      await openPage(page);
+      await deleteQaRows(page);
+      await page.close();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("Tạo event content: Add New -> chọn Master + Agent chưa có dòng nào, nhập 1 sự kiện QA -> Submit gửi create thành công, dòng xuất hiện đúng", async ({ page }) => {
+    // Dọn dòng QA cũ còn sót (nếu có) trước khi tạo mới
+    const stale = await deleteQaRows(page);
+    if (stale.length > 0) writes.length = 0;
+
+    const { json: all } = await listAll(page);
+    const used = new Set(all.data.list.map((x) => x.agentId));
+
+    // Tìm 1 Agent CHƯA có dòng Event Content (lấy từ dữ liệu thật theo từng master) để không đụng event có sẵn
+    await addBtn(page).click();
+    let pick = null;
+    for (const m of await masters()) {
+      const ags = await dlgPickMaster(page, m);
+      const a = ags.find((v) => !used.has(v.value));
+      if (a) {
+        pick = { m, a };
+        break;
+      }
+    }
+    test.skip(!pick, "Mọi agent đều đã có dòng Event Content, không có agent trống để tạo event QA");
+    qaMaster = pick.m;
+    qaAgent = pick.a;
+    await dlgPickAgent(page, qaAgent);
+
+    await dlgTitle(page, 0).fill(qaTitle);
+    await dlgDesc(page, 0).fill(qaDesc);
+    const row = dlgRowAt(page, 0);
+    await pickDay(page, dlgDates(row).nth(0), 15);
+    await pickDay(page, dlgDates(row).nth(1), 20);
+    await expect(dlgDates(row).nth(0)).toHaveValue(/^15-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/);
+    await expect(dlgDates(row).nth(1)).toHaveValue(/^20-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/);
+    for (const msg of Object.values(MSG)) await expect(dlgError(page, msg), msg).toHaveCount(0);
+
+    needCleanup = true; // từ đây có thể đã tạo dòng QA -> afterAll dọn nếu test sau fail
+    const [res] = await Promise.all([page.waitForResponse(isCreate), submitBtn(page).click()]);
+    expect(res.status()).toBe(200);
+    const body = bodyOf(reqOf(res));
+    expect(body).toEqual({
+      agentId: qaAgent.value,
+      events: [{ title: qaTitle, description: qaDesc, visibilityStartDate: expect.any(Number), visibilityEndDate: expect.any(Number) }],
+    });
+    expect(body.events[0].visibilityEndDate).toBeGreaterThan(body.events[0].visibilityStartDate);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      status: "success",
+      messageCode: "CREATE_EVENT_CONTENT_SUCCESS",
+      message: "Event content created successfully",
+    });
+    expect(typeof json.data.id).toBe("number");
+    qaId = json.data.id;
+
+    await expect(page.locator(".Toastify__toast").filter({ hasText: "Event content created successfully" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    await settle(page);
+
+    // Tìm lại theo Agent: đúng 1 dòng với 1 sự kiện vừa tạo
+    await selectOption(page, "agentId", qaAgent);
+    const found = await search(page);
+    expect(found.body.filters).toEqual({ agentIds: [qaAgent.value] });
+    expect(found.json.data.totalCount).toBe(1);
+    const x = found.json.data.list[0];
+    expect(x).toMatchObject({
+      id: qaId,
+      masterAgentId: qaMaster.value,
+      masterAgentName: qaMaster.label,
+      agentId: qaAgent.value,
+      agentName: qaAgent.label,
+      numberOfEvents: 1,
+    });
+    expect(x.events).toMatchObject([{ title: qaTitle, description: qaDesc }]);
+    expect(isQaRow(x)).toBe(true);
+    await expect(rows(page)).toHaveCount(1);
+    await expect(cellAt(page, 0, COL.master)).toHaveText(norm(qaMaster.label));
+    await expect(cellAt(page, 0, COL.agent)).toHaveText(norm(qaAgent.label));
+    await expect(cellAt(page, 0, COL.total)).toHaveText("1");
+    await expect(summary(page)).toHaveText("Showing 1 - 1 of 1 records");
+    await expandBtn(page, 0).click();
+    await expect(subRows(page, 0)).toHaveCount(1);
+    await expect(subRows(page, 0).first().locator("td").nth(0)).toHaveText(qaTitle);
+    await expect(subRows(page, 0).first().locator("td").nth(1)).toHaveText(qaDesc);
+
+    // Chỉ gửi đúng 1 request ghi: create
+    expect(writes.map(writeName)).toEqual(["create"]);
+  });
+
+  test("Sửa event content QA: đổi Title sự kiện cũ + thêm sự kiện thứ 2 -> Submit gửi update thành công, danh sách cập nhật", async ({ page }) => {
+    test.skip(qaId === null, "Chưa tạo được event content QA ở test trước");
+
+    await selectOption(page, "agentId", qaAgent);
+    const before = await search(page);
+    expect(before.json.data.list.map((x) => x.id)).toEqual([qaId]);
+    expect(isQaRow(before.json.data.list[0])).toBe(true);
+
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), editIcon(page, 0).click()]);
+    expect(bodyOf(reqOf(viewRes)).id).toBe(qaId);
+    const view = (await viewRes.json()).data;
+    expect(view).toMatchObject({ id: qaId, masterAgentId: qaMaster.value, agentId: qaAgent.value });
+    expect(view.events).toHaveLength(1);
+    const ev = view.events[0];
+    await expect(dialog(page)).toContainText("Update Event");
+    await expect(dlgMaster(page).locator(".ant-select-selection-item")).toHaveText(norm(qaMaster.label));
+    await expect(dlgAgent(page).locator(".ant-select-selection-item")).toHaveAttribute("title", optionText(qaAgent));
+    await expect(dlgRows(page)).toHaveCount(1);
+    await expect(dlgTitle(page, 0)).toHaveValue(qaTitle);
+    await expect(dlgDesc(page, 0)).toHaveValue(qaDesc);
+
+    await dlgTitle(page, 0).fill(qaTitleUpdated);
+    await dlgAddRowBtn(page).click();
+    await expect(dlgRows(page)).toHaveCount(2);
+    await dlgTitle(page, 1).fill(qaTitle2);
+    await dlgDesc(page, 1).fill(qaDesc2);
+    await pickDay(page, dlgDates(dlgRowAt(page, 1)).nth(0), 16);
+
+    const [res] = await Promise.all([page.waitForResponse(isUpdate), submitBtn(page).click()]);
+    expect(res.status()).toBe(200);
+    const body = bodyOf(reqOf(res));
+    expect(body).toEqual({
+      id: qaId,
+      agentId: qaAgent.value,
+      events: [
+        { id: ev.id, title: qaTitleUpdated, description: qaDesc, visibilityStartDate: ev.visibilityStartDate, visibilityEndDate: ev.visibilityEndDate },
+        { title: qaTitle2, description: qaDesc2, visibilityStartDate: expect.any(Number), visibilityEndDate: null },
+      ],
+    });
+    expect(await res.json()).toMatchObject({
+      status: "success",
+      messageCode: "UPDATE_EVENT_CONTENT_SUCCESS",
+      message: "Event content updated successfully",
+    });
+    await expect(page.locator(".Toastify__toast").filter({ hasText: "Event content updated successfully" })).toBeVisible();
+    await expect(dialog(page)).toBeHidden();
+    await settle(page);
+
+    // Bộ lọc Agent vẫn còn -> dòng QA hiển thị 2 sự kiện với dữ liệu mới
+    const after = await search(page);
+    expect(after.json.data.list.map((x) => x.id)).toEqual([qaId]);
+    const x = after.json.data.list[0];
+    expect(x.numberOfEvents).toBe(2);
+    expect(x.events.map((e) => e.title).sort()).toEqual([qaTitleUpdated, qaTitle2].sort());
+    expect(x.events.find((e) => e.id === ev.id)).toMatchObject({ title: qaTitleUpdated, description: qaDesc });
+    expect(isQaRow(x)).toBe(true);
+    await expect(cellAt(page, 0, COL.total)).toHaveText("2");
+    await expandBtn(page, 0).click();
+    await expect(subRows(page, 0)).toHaveCount(2);
+    await expect(subRows(page, 0).locator("td:first-child")).toHaveText(x.events.map((e) => e.title));
+
+    expect(writes.map(writeName)).toEqual(["update"]);
+  });
+
+  test("Xoá event content QA (dọn dẹp): icon Delete -> xác nhận đúng tên agent -> Delete gửi delete thành công, dòng biến mất", async ({ page }) => {
+    test.skip(qaId === null, "Chưa tạo được event content QA ở test trước");
+
+    // Xoá qua UI (kiểm tra tên agent trong hộp thoại xác nhận) -> xoá cả dòng QA cũ còn sót (nếu có)
+    const deleted = await deleteQaRows(page);
+    expect(deleted.map((x) => x.id)).toContain(qaId);
+    needCleanup = false;
+
+    // Lọc theo Agent đã dùng: không còn dòng nào
+    await selectOption(page, "agentId", qaAgent);
+    const { json } = await search(page);
+    expect(json.data?.totalCount ?? 0).toBe(0);
+    await expect(rows(page)).toHaveCount(0);
+    await expect(page.getByText("There are no entries found").first()).toBeVisible();
+
+    // Không còn dòng QA nào sót trên toàn danh sách
+    await resetBtn(page).click();
+    const left = (await listAll(page)).json.data.list.filter(isQaRow);
+    expect(left.map((x) => x.id), "Còn dòng QA sót lại trên danh sách").toEqual([]);
+    expect([...new Set(writes.map(writeName))]).toEqual(["delete"]);
   });
 });
