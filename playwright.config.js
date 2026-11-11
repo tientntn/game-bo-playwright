@@ -67,8 +67,9 @@ module.exports = defineConfig({
   use: {
     baseURL: `https://${boDomain}/`,
     // Mặc định click/fill/waitFor KHÔNG có giới hạn riêng nên khi locator sai phải chờ hết test timeout (90-240s).
-    // Đặt giới hạn để thao tác kẹt fail sau 15s. Nếu trang dev chậm gây fail oan thì tăng lên 20-30s.
-    actionTimeout: 15_000,
+    // Đặt giới hạn để thao tác kẹt fail sau 30s. Lưu ý: actionTimeout cũng là timeout MẶC ĐỊNH của
+    // page.waitForResponse / waitForRequest (không truyền { timeout }) nên 15s làm nhiều test chờ API chậm fail oan.
+    actionTimeout: 30_000,
     navigationTimeout: 30_000,
   },
   projects: [
