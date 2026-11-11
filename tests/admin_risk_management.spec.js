@@ -24,7 +24,8 @@
 //  - Mọi describe trừ cuối là "chỉ đọc": request ghi (rulesetting/create | update | deactivate) bị chặn ở tầng mạng (route.abort); test kiểm tra payload / thông báo
 //    dùng route.fulfill trả response GIẢ (request KHÔNG tới server). afterEach kiểm tra request ghi bắt được đúng danh sách được phép.
 //    Rule có sẵn của team (kể cả "QA Rule ..." / "ZZ Audit Rule" của bộ test API) chỉ bị thao tác bằng request GIẢ, không bao giờ bị ghi thật.
-//  - Describe cuối "CRUD (ghi dữ liệu thật)" chạy tuần tự, CHỈ thao tác trên 1 rule QA có tên bắt đầu "QA-AUTO-<số>":
+//  - Describe cuối "CRUD (ghi dữ liệu thật)" chỉ chạy khi RUN_FULL_TESTS=true trong .env (false / không khai báo -> skip cả nhóm, không gửi request ghi nào;
+//    xem RUN_FULL_TESTS.md). Nhóm chạy tuần tự, CHỈ thao tác trên 1 rule QA có tên bắt đầu "QA-AUTO-<số>":
 //      * Màn hình KHÔNG có chức năng xoá rule -> rule QA KHÔNG xoá được bằng UI, nên test chỉ TẠO rule QA khi chưa có rule nào (tối đa 1 lần trong cả vòng đời),
 //        các lần chạy sau dùng lại rule đó. Rule QA luôn được đưa về trạng thái INACTIVE khi kết thúc (afterAll) để không sinh cảnh báo thật.
 //      * Test sửa (Name / Severity / Description / ngưỡng) luôn khôi phục lại giá trị gốc trong finally; test Activate / Deactivate kết thúc ở Inactive.
@@ -33,6 +34,7 @@
 //  - Không hard-code dữ liệu: rule / category / game đều lấy từ response list và dropdown.
 const { test, expect } = require("@playwright/test");
 const { buildStorageState } = require("./helpers/session");
+const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
 test.use({
@@ -1576,6 +1578,8 @@ test.describe("Administration > Risk Management", () => {
   // ===== NHÓM CRUD (GHI DỮ LIỆU THẬT trên rule QA) =====
   test.describe("CRUD (ghi dữ liệu thật trên rule QA-AUTO, kết thúc ở Inactive)", () => {
     test.describe.configure({ mode: "serial" });
+    // Cờ RUN_FULL_TESTS (xem RUN_FULL_TESTS.md): false -> skip cả nhóm, không gửi request ghi nào
+    test.skip(!RUN_FULL_TESTS, SKIP_WRITE_REASON);
 
     let qa; // { id, name } - rule QA (tên bắt đầu QA-AUTO-<số>)
 

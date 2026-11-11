@@ -97,6 +97,7 @@ Biến môi trường của shell **ưu tiên hơn** `.env` (dotenv không ghi �
 | `tests/agent_entity.spec.js` (nhóm "Agents > Create Agent (ghi dữ liệu thật)") | Có |
 | `tests/admin_users.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên user QA, luôn khôi phục lại)") | Có |
 | `tests/admin_roles.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên role QA, luôn khôi phục lại)") | Có |
+| `tests/admin_risk_management.spec.js` (nhóm "CRUD (ghi dữ liệu thật trên rule QA-AUTO, kết thúc ở Inactive)") | Có |
 | Các spec khác có ghi dữ liệu (vd `admin_currency.spec.js` describe "CRUD", user / roles / entity...) | **Chưa** - vẫn chạy bất kể cờ. Cần rà soát và gắn cờ nếu muốn `false` = hoàn toàn không tạo dữ liệu. |
 
 ## Lưu ý
