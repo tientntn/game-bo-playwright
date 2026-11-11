@@ -54,12 +54,22 @@ const cookieEntries = sessionEntries.filter(
 // );
 
 module.exports = defineConfig({
+  // Chia song song theo TỪNG TEST (mặc định chỉ chia theo file nên file 100+ test chạy tuần tự trong 1 worker).
+  // Các nhóm CRUD vẫn tuần tự nhờ test.describe.configure({ mode: "serial" }) trong từng spec.
+  // Project "api" bắt buộc --workers=1 (xem script test:api) nên không bị ảnh hưởng.
+  fullyParallel: true,
   // Thêm response-reporter.js bên cạnh "list" mặc định - reporter này in ra terminal
   // toàn bộ request/response của các lần gọi apiPost() khi 1 test tests/api/* fail,
   // để dễ kiểm tra lỗi API mà không cần mở HTML report (xem tests/api/helpers/api-client.js).
   reporter: [["list"], ["./tests/api/helpers/response-reporter.js"]],
+  // expect(...) fail sau 10s (mặc định 5s) - test.setTimeout() trong spec vẫn giữ nguyên cho luồng dài.
+  expect: { timeout: 10_000 },
   use: {
     baseURL: `https://${boDomain}/`,
+    // Mặc định click/fill/waitFor KHÔNG có giới hạn riêng nên khi locator sai phải chờ hết test timeout (90-240s).
+    // Đặt giới hạn để thao tác kẹt fail sau 15s. Nếu trang dev chậm gây fail oan thì tăng lên 20-30s.
+    actionTimeout: 15_000,
+    navigationTimeout: 30_000,
   },
   projects: [
     // 1. Dự án chuyên đi đăng nhập (Nếu bạn dùng file setup để xử lý logic khác)
