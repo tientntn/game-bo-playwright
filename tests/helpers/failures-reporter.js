@@ -11,7 +11,6 @@ const path = require("path");
 
 const OUTPUT = path.resolve(process.cwd(), "test-results", "failures.md");
 const MAX_STEPS = 18; // số bước gần nhất (trước chỗ lỗi) hiển thị cho mỗi test
-const MAX_ERROR_LINES = 14;
 
 const stripAnsi = (s) => String(s || "").replace(/\u001b\[[0-9;]*m/g, "");
 const rel = (p) => path.relative(process.cwd(), p).replace(/\\/g, "/");
@@ -52,18 +51,39 @@ function classify(test, result, error) {
   return "assertion";
 }
 
-// Test được đánh dấu lỗi app đã biết bằng comment "LỖI ỨNG DỤNG" ngay phía trên test (tối đa ~8 dòng)
+// Đọc (có cache) các dòng của 1 file spec; không đọc được thì trả về mảng rỗng
 const sourceCache = new Map();
-function hasKnownBugMarker(test) {
+function fileLines(file) {
   try {
-    const file = test.location.file;
     if (!sourceCache.has(file)) sourceCache.set(file, fs.readFileSync(file, "utf8").split(/\r?\n/));
-    const lines = sourceCache.get(file);
-    const from = Math.max(0, test.location.line - 9);
-    return lines.slice(from, test.location.line).some((l) => /LỖI ỨNG DỤNG ĐÃ XÁC NHẬN|LỖI ỨNG DỤNG \(/.test(l));
+    return sourceCache.get(file);
   } catch {
-    return false;
+    return [];
   }
+}
+
+// Test được đánh dấu lỗi app đã biết bằng comment "LỖI ỨNG DỤNG" ngay phía trên test (tối đa ~8 dòng)
+function hasKnownBugMarker(test) {
+  const from = Math.max(0, test.location.line - 9);
+  return fileLines(test.location.file).slice(from, test.location.line).some((l) => /LỖI ỨNG DỤNG ĐÃ XÁC NHẬN|LỖI ỨNG DỤNG \(/.test(l));
+}
+
+// URL đầy đủ của màn hình, lấy từ dòng comment đầu spec: "// Administration > Audit Logs  (https://dev-bo.../admin/audit-logs)"
+function specUrl(test) {
+  for (const l of fileLines(test.location.file).slice(0, 4)) {
+    const m = l.match(/\((https?:\/\/[^)\s]+)\)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// Tên cột bị so sánh sai, đoán từ dòng code bị lỗi: expect(c[COL.module], at) -> "Module"
+function columnOf(error) {
+  const loc = error && error.location;
+  const line = loc ? fileLines(loc.file)[loc.line - 1] : null;
+  const m = line && line.match(/\bCOL\.(\w+)/);
+  if (!m) return null;
+  return /^[a-z]{1,3}$/.test(m[1]) ? m[1].toUpperCase() : fieldName(m[1]); // ip -> IP, maxPayout -> Max Payout
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +157,12 @@ function describeTarget(raw) {
   return { vi: `một phần tử trên trang (${sel})`, known: false };
 }
 
+// Bước "mở màn hình" (khớp với text do humanizeStep tạo ra)
+const NAV = /^Truy cập màn hình `/;
+
+// Giá trị nhập dài (vd test nhập 256 ký tự) thì rút gọn nhưng vẫn cho biết độ dài
+const shortValue = (v) => (v.length > 40 ? `"${v.slice(0, 40)}…" (${v.length} ký tự)` : `"${v}"`);
+
 // Các bước thuần kỹ thuật, QA không cần thấy
 function isNoise(t) {
   return (
@@ -154,10 +180,15 @@ function humanizeStep(step) {
   if (isNoise(t)) return null;
 
   let m;
-  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Mở màn hình \`${m[1]}\``;
+  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Truy cập màn hình \`${m[1]}\``;
   if (/^Reload/i.test(t)) return "Tải lại trang (F5)";
   if ((m = t.match(/^Click\s+(.*)/i))) return `Bấm vào ${describeTarget(m[1]).vi}`;
-  if ((m = t.match(/^Fill\s+"(.*?)"\s+(.*)$/i))) return `Nhập "${m[1]}" vào ${describeTarget(m[2]).vi}`;
+  // Title có thể là: Fill "giá trị" locator(...)  |  Fill "" locator(...) (xoá)  |  Fill "giá trị" (không kèm locator)
+  if ((m = t.match(/^Fill\s+"(.*?)"\s+(.*)$/i))) {
+    const where = describeTarget(m[2]).vi;
+    return m[1] === "" ? `Xoá nội dung ${where}` : `Nhập dữ liệu: ${shortValue(m[1])} vào ${where}`;
+  }
+  if ((m = t.match(/^Fill\s+"(.*)"\s*$/i))) return m[1] === "" ? "Xoá nội dung ô đang nhập" : `Nhập dữ liệu: ${shortValue(m[1])} vào ô đang chọn`;
   if ((m = t.match(/^Fill\s+(.*)/i))) return `Xoá nội dung ${describeTarget(m[1]).vi}`;
   if ((m = t.match(/^Hover\s+(.*)/i))) return `Rê chuột vào ${describeTarget(m[1]).vi}`;
   if ((m = t.match(/^Press sequentially\s+"(.*?)"/i)) || (m = t.match(/^Type\s+"(.*?)"/i))) return `Gõ "${m[1]}"`;
@@ -170,11 +201,13 @@ function humanizeStep(step) {
 
   if ((m = t.match(/^Expect "(\w+)"(?:\s*(.*))?/))) {
     // Chỉ giữ các kiểm tra QA hiểu được; bước kiểm tra bị lỗi sẽ được thay bằng phần "Lỗi" bên trên
+    if (m[1] === "toHaveURL") return "Kiểm tra: đúng địa chỉ màn hình mong đợi";
+    // Không biết kiểm tra cái gì (title không kèm locator) thì bỏ: "Kiểm tra: thấy " không giúp QA làm theo được
     const target = m[2] ? describeTarget(m[2]).vi : "";
+    if (!target) return null;
     if (m[1] === "toBeVisible") return `Kiểm tra: thấy ${target}`;
     if (m[1] === "toBeHidden") return `Kiểm tra: không còn thấy ${target}`;
     if (m[1] === "toHaveText" || m[1] === "toContainText") return `Kiểm tra: ${target} có đúng chữ mong đợi`;
-    if (m[1] === "toHaveURL") return "Kiểm tra: đúng địa chỉ màn hình mong đợi";
     if (m[1] === "toBeEnabled") return `Kiểm tra: ${target} bấm được`;
     if (m[1] === "toBeDisabled") return `Kiểm tra: ${target} bị khoá (không bấm được)`;
     return null; // toHaveCount, toEqual, toBe... quá kỹ thuật
@@ -182,6 +215,9 @@ function humanizeStep(step) {
   if (step.category === "test.step") return `**${t}**`;
   return null;
 }
+
+// Bước kiểm tra (Expect) khác với bước thao tác (bấm, nhập...): QA chỉ làm theo được các bước thao tác
+const isCheck = (text) => /^Kiểm tra:/.test(text);
 
 // Duyệt cây step theo thứ tự thời gian. Mỗi phần tử: { text, err, placeholder }
 //   err = bước thật (pw:api / expect) có lỗi; placeholder = bước lỗi nhưng không dịch được (vd expect(...).toEqual)
@@ -209,7 +245,7 @@ function stepsOf(result) {
     if (x.placeholder && i !== lastErr) return; // bỏ bước lỗi đã bị bắt lại
     const last = kept[kept.length - 1];
     if (last && last.text === x.text) return; // bỏ trùng liên tiếp
-    kept.push({ text: x.text, failed: i === lastErr });
+    kept.push({ text: x.text, failed: i === lastErr, check: isCheck(x.text) });
   });
   return kept.slice(-MAX_STEPS);
 }
@@ -217,16 +253,64 @@ function stepsOf(result) {
 // ---------------------------------------------------------------------------
 // Trình bày lỗi
 // ---------------------------------------------------------------------------
-function shortError(error) {
-  const lines = stripAnsi(error && (error.message || error.value) || "Không rõ lỗi").split("\n");
-  // bỏ call log và code frame, chỉ giữ phần mô tả
-  const out = [];
-  for (const l of lines) {
-    if (/^\s*Call log:/.test(l) || /^\s*at .*\(.*:\d+:\d+\)/.test(l) || /^\s+\d+ \|/.test(l) || /^\s*>\s*\d+ \|/.test(l)) break;
-    out.push(l.trimEnd());
+// Câu mô tả tự đặt trong spec, vd expect(x, `dòng 5 (log 18115)`).toBe(...): Playwright ghi câu đó lên đầu message,
+// sau đó là dòng trống rồi mới tới "expect(...)". Đây thường là thông tin QA cần nhất (lỗi ở dòng / bản ghi nào).
+function customMessage(raw) {
+  const m = raw.match(/^(?:Error: )?([\s\S]+?)\n\s*\n\s*expect\(/);
+  const msg = m && m[1].trim();
+  return msg && msg.length <= 300 && !/^expect\(|^Locator:|^Call log:/m.test(msg) ? msg : null;
+}
+
+// Giải thích lỗi bằng tiếng Việt đơn giản cho QA: { summary, detail, expected, actual }
+//   detail = câu mô tả tự đặt trong spec (+ tên cột nếu đoán được) để QA biết chỗ nào sai
+function explainError(error) {
+  const e = explainErrorCore(error);
+  const raw = stripAnsi((error && (error.message || error.value)) || "");
+  const parts = [customMessage(raw), columnOf(error) && `cột ${columnOf(error)}`].filter(Boolean);
+  if (parts.length) e.detail = parts.join(" · ");
+  return e;
+}
+
+function explainErrorCore(error) {
+  const raw = stripAnsi((error && (error.message || error.value)) || "");
+  const sec = (ms) => `${Math.round(Number(ms) / 1000)} giây`;
+  const grab = (re) => {
+    const m = raw.match(re);
+    return m ? m[1].trim() : null;
+  };
+  const locatorLine = grab(/Locator:\s+(.+)/) || grab(/waiting for (locator\(.*|getBy.*)/);
+  const target = locatorLine ? describeTarget(locatorLine).vi : null;
+  const expected = (grab(/Expected(?: string| pattern| value)?:\s*(.+)/) || "").replace(/^not\s+/, "khác ") || null;
+  const actual = grab(/Received(?: string| value| array)?:\s*(.+)/);
+  let m;
+
+  if (/ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_INTERNET_DISCONNECTED|ERR_CONNECTION|ERR_ABORTED|ERR_TIMED_OUT/.test(raw)) {
+    return { summary: "Mất kết nối mạng nên không mở được BO (không phải lỗi của màn hình)." };
   }
-  while (out.length && !out[out.length - 1]) out.pop();
-  return out.slice(0, MAX_ERROR_LINES).join("\n");
+  if ((m = raw.match(/Test timeout of (\d+)ms exceeded/))) {
+    return { summary: `Test chạy quá ${sec(m[1])} mà chưa xong (server chậm hoặc màn hình tải quá lâu).` };
+  }
+  if ((m = raw.match(/waitFor(?:Response|Request): Timeout (\d+)ms/))) {
+    return { summary: `Màn hình không nhận được phản hồi từ server trong ${sec(m[1])} (server chậm hoặc quá tải).` };
+  }
+  if ((m = raw.match(/locator\.\w+: Timeout (\d+)ms/))) {
+    return { summary: `Không tìm thấy hoặc không thao tác được ${target || "phần tử cần thiết"} trong ${sec(m[1])}.` };
+  }
+  if (/expect\(locator\)\.toBeVisible\(\) failed/.test(raw)) return { summary: `Không thấy ${target || "phần tử mong đợi"} trên màn hình.` };
+  if (/expect\(locator\)\.toBeHidden\(\) failed|not\.toBeVisible\(\) failed/.test(raw)) return { summary: `${target || "Phần tử"} vẫn còn hiển thị (mong đợi đã ẩn).` };
+  if (/expect\(locator\)\.(?:not\.)?toHaveCount\(/.test(raw)) return { summary: `Số lượng ${target || "phần tử"} không đúng.`, expected, actual };
+  if (/expect\(locator\)\.not\.toBeEmpty\(\) failed/.test(raw)) return { summary: `${target || "Phần tử"} đang trống, mong đợi có nội dung.` };
+  if (/expect\(locator\)\.(toHaveText|toContainText|toHaveValue|toHaveAttribute|toHaveClass)\(/.test(raw)) {
+    return { summary: `Nội dung của ${target || "phần tử"} không đúng.`, expected, actual };
+  }
+  if (/expect\(received\)\.\w+\(/.test(raw)) {
+    return { summary: "Giá trị thực tế khác giá trị mong đợi.", expected, actual };
+  }
+  if (/TypeError|ReferenceError|Cannot read properties|Cannot convert undefined/.test(raw)) {
+    return { summary: "Test không đọc được dữ liệu từ màn hình / API (dữ liệu không về hoặc trống). Thường do server chậm, hãy chạy lại." };
+  }
+  const first = raw.split("\n").find((l) => l.trim()) || "Không rõ lỗi";
+  return { summary: first.replace(/^Error:\s*/, "").slice(0, 200) };
 }
 
 function screenshotOf(result, baseDir) {
@@ -298,8 +382,8 @@ class FailuresReporter {
         L.push(`| ${CATEGORIES[k].title} | ${byCat[k].length} | ${todo[k]} |`);
       }
       L.push("");
-      L.push("> Mỗi lỗi có: **kiểm tra gì**, **mong đợi vs thực tế**, **các bước đã thực hiện** (dịch từ log tự động), ảnh chụp lúc fail (nếu có) và lệnh chạy lại.");
-      L.push("> Các bước chỉ là gợi ý để QA tái hiện trên BO; để biết đầy đủ hãy mở file spec ở dòng được ghi.");
+      L.push("> Cách đọc: mỗi lỗi có **Kiểm tra** (test đang kiểm tra điều gì), **Kết quả** (vì sao không đạt), **Mong đợi**, **Các bước đã thực hiện** (để QA làm lại trên BO) và ảnh lúc lỗi.");
+      L.push("> Các bước được dịch tự động từ log nên chỉ là gợi ý; nếu thấy bước nào khó hiểu, hãy làm theo mô tả ở mục \"Kiểm tra\".");
       L.push("");
 
       for (const k of ["assertion", "known", "timeout", "network"]) {
@@ -329,6 +413,8 @@ class FailuresReporter {
       L.push("");
     }
 
+    if (this.failures.length) this.renderRerun(L);
+
     try {
       fs.mkdirSync(baseDir, { recursive: true });
       fs.writeFileSync(OUTPUT, L.join("\n"), "utf8");
@@ -338,31 +424,101 @@ class FailuresReporter {
     }
   }
 
+  // Cuối file: lệnh chạy lại TẤT CẢ test lỗi (UI và API dùng script npm khác nhau).
+  // Chọn test theo "file:dòng" thay vì -g "tên test" vì tên test có dấu nháy / ngoặc / % làm hỏng lệnh trong shell.
+  renderRerun(L) {
+    const groups = { ui: { script: "test:ui", refs: new Set() }, api: { script: "test:api", refs: new Set() } };
+    for (const { test } of this.failures) {
+      const project = test.parent?.project?.()?.name || test.titlePath()[1] || "";
+      groups[project === "api" ? "api" : "ui"].refs.add(`${rel(test.location.file)}:${test.location.line}`);
+    }
+
+    L.push("## Chạy lại tất cả test lỗi");
+    L.push("");
+    L.push("Chạy từ thư mục gốc của project. Sau khi chạy xong, file này được tạo lại và chỉ còn các test vẫn lỗi.");
+    L.push("");
+    for (const g of Object.values(groups)) {
+      if (!g.refs.size) continue;
+      L.push(`**${g.script === "test:api" ? "Test API" : "Test UI"} (${g.refs.size} test):**`);
+      L.push("");
+      L.push("```");
+      // Windows giới hạn ~8000 ký tự cho 1 dòng lệnh: nhiều test quá thì tách thành nhiều lệnh
+      let line = "";
+      for (const ref of g.refs) {
+        const cmd = `npm run ${g.script} --`;
+        if (line && line.length + ref.length + 1 > 7000) {
+          L.push(line);
+          line = "";
+        }
+        line = line ? `${line} ${ref}` : `${cmd} ${ref}`;
+      }
+      if (line) L.push(line);
+      L.push("```");
+      L.push("");
+    }
+  }
+
   renderFailure(L, f, baseDir) {
     const { test, result, error } = f;
     const { screen, group, name } = screenOf(test);
-    const file = rel(test.location.file);
+    const why = explainError(error);
+    const steps = stepsOf(result);
+    const urlStep = steps.find((s) => NAV.test(s.text));
+    const stepUrl = urlStep ? urlStep.text.match(/`(.*)`/)[1] : null;
+    // Ưu tiên URL đầy đủ ghi ở đầu spec (có domain) nếu khớp với đường dẫn test đã mở
+    const header = specUrl(test);
+    const url = header && (!stepUrl || header.endsWith(stepUrl)) ? header : stepUrl;
+    const open = url ? `Truy cập màn hình \`${url}\`` : `Truy cập màn hình **${screen}**`;
+
     L.push(`#### ${screen}${group ? " > " + group : ""}`);
     L.push(`**Kiểm tra:** ${name}`);
     L.push("");
-    L.push("**Lỗi:**");
-    L.push("```");
-    L.push(shortError(error));
-    L.push("```");
-    const steps = stepsOf(result);
-    if (steps.length) {
-      L.push("");
-      L.push("**Các bước đã thực hiện (gần nhất):**");
-      steps.forEach((s, i) => L.push(`${i + 1}. ${s.text}${s.failed ? "  ❌ <- lỗi ở bước này" : ""}`));
+    L.push("**Kết quả:**");
+    L.push(`- ❌ ${why.summary}`);
+    if (why.detail) L.push(`- Lỗi ở: ${why.detail}`);
+    if (why.actual) L.push(`- Thực tế: ${why.actual}`);
+    L.push("");
+    L.push("**Mong đợi:**");
+    L.push(why.expected || 'Xem mục "Kiểm tra" ở trên.');
+    L.push("");
+
+    // Các bước thao tác (bấm, nhập, chọn...) mới giúp QA làm lại được; chỉ có "Kiểm tra: ..." thì không đủ.
+    // Khi không có bước thao tác nào (vd test chỉ so sánh dữ liệu bảng với response API) thì chỉ dẫn bằng lời.
+    const actions = steps.filter((s) => !s.failed && !s.check && !NAV.test(s.text));
+    // Test so khớp bảng với response API: bước lỗi là 1 phép so sánh dữ liệu, không phải thao tác trên màn hình
+    const isApiCompare = /response API/i.test(name);
+    const failedText = isApiCompare
+      ? `❌ Đối chiếu${why.detail ? ` **${why.detail}**` : " từng dòng"} với response của API (mở DevTools F12 > Network, xem request gửi khi bấm Search): giá trị trên bảng không khớp response.`
+      : `❌ Đến bước này thì không đạt${why.detail ? ` (${why.detail})` : ""}`;
+    const list = [];
+    if (actions.length >= 1) {
+      // Bước mở màn hình đầu tiên ghi URL đầy đủ; nếu log không có bước mở màn hình thì thêm vào đầu
+      let opened = false;
+      for (const s of steps) {
+        if (s.failed) list.push(failedText);
+        else if (NAV.test(s.text) && !opened) {
+          list.push(open);
+          opened = true;
+        } else list.push(s.text);
+      }
+      if (!opened) list.unshift(open);
+    } else {
+      list.push(open);
+      if (isApiCompare) {
+        list.push("Bấm nút **Search**");
+        list.push(failedText);
+      } else {
+        list.push(`Thực hiện theo mô tả ở mục "Kiểm tra"${why.detail ? ` (chỗ lỗi: **${why.detail}**)` : ""} rồi so sánh với mục "Kết quả"`);
+      }
     }
+    L.push("**Các bước đã thực hiện (gần nhất):**");
+    list.forEach((t, i) => L.push(`${i + 1}. ${t}`));
+
     const shot = screenshotOf(result, baseDir);
     if (shot) {
       L.push("");
       L.push(`**Ảnh lúc lỗi:** [${shot}](${shot})`);
     }
-    L.push("");
-    L.push(`**Chạy lại:** \`npx playwright test ${file}:${test.location.line} --project=setup --project=chromium\``);
-    L.push(`_Vị trí test: ${file}:${test.location.line} · ${(result.duration / 1000).toFixed(1)}s_`);
     L.push("");
   }
 }
