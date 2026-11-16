@@ -277,8 +277,10 @@ test.describe("Games > Update Game", () => {
         ["Labels", "labels"],
         ["Tags", "tags"],
       ]) {
+        // Một số ô (vd Language) hiển thị giá trị dạng thẻ <span class="ant-tag"> thay vì .ant-select-selection-item[title] -> đếm cả hai kiểu
         const shown = await field(page, label)
-          .locator('.ant-select-selection-overflow-item:not([aria-hidden="true"]) .ant-select-selection-item[title]')
+          .locator('.ant-select-selection-overflow-item:not([aria-hidden="true"]):not(.ant-select-selection-overflow-item-rest):not(.ant-select-selection-overflow-item-suffix)')
+          .filter({ has: page.locator(".ant-select-selection-item[title], .ant-tag") })
           .count();
         const rest = (await field(page, label).locator(".ant-select-selection-overflow-item-rest").allInnerTexts()).reduce(
           (sum, t) => sum + Number(t.match(/\+\s*(\d+)/)?.[1] ?? 0),

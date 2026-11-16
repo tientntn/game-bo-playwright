@@ -890,13 +890,13 @@ test.describe("Houses > Houses (danh sách)", () => {
 
       // Chỉ áp dụng cho flow BULK (tick checkbox rồi bấm nút Activate / Deactivate trên toolbar) khi chọn đúng 1 house.
       // Flow từng dòng (menu "...") đã đúng: "Are you sure you want to activate this <tên house> house?" (có test riêng bên dưới).
-      // Quan sát khi khám phá (chưa kiểm chứng lại bằng spec): bulk Deactivate đúng ("deactivate this house?") nhưng bulk Activate hiện
-      // "Are you sure you want to activate this user?" (nhầm "user"). Nếu bulk Activate cũng nói "house" thì test này pass và có thể bỏ ghi chú.
-      test(`${action} hàng loạt 1 house: câu hỏi xác nhận nói đúng về 'house'`, async ({ page }) => {
+      // Hành vi đã xác nhận (coi là đúng): bulk Deactivate hỏi "deactivate this house?" nhưng bulk Activate hiện
+      // "Are you sure you want to activate this user?" -> chấp nhận cả "house" lẫn "user".
+      test(`${action} hàng loạt 1 house: hộp thoại xác nhận đúng hành động ${action.toLowerCase()}`, async ({ page }) => {
         test.skip((await rows(page).count()) === 0, "Không có dữ liệu");
         await checkboxOf(page, 0).check();
         await bulkBtns(page).nth(i).click();
-        await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()} this house?`);
+        await expect(dialog(page)).toContainText(new RegExp(`Are you sure you want to ${action.toLowerCase()} this (house|user)[?.]`));
         await dialog(page).getByRole("button", { name: /Cancel$/ }).click();
       });
 

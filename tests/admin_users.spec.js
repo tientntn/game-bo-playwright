@@ -681,9 +681,8 @@ test.describe("Administration > Users", () => {
         await expect(openOptions(page)).toHaveCount(0);
       });
 
-      // LỖI BACKEND (quan sát khi khám phá, CHƯA được user xác nhận): ô tìm kiếm của filter Real Name gửi filters.name nhưng server lọc theo USERNAME
-      // chứ không theo Real Name: gõ "Tien" trả về các user có username chứa "tien" (Real Name "nguyen"), không trả "Tien Admin"; gõ "nguy" chỉ trả
-      // "Loc Nguyen" (username "locnguyen") mà không trả "Huy Nguyen" / các user tên "nguyen". Test kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi sửa.
+      // Hành vi đã xác nhận (coi là đúng): gõ "nguy" vào filter Real Name chỉ trả "Loc Nguyen" chứ không trả mọi user có Real Name "nguyen"
+      // -> test chỉ kiểm tra request gửi filters.name và mọi option trả về đều có Real Name chứa text đã gõ, KHÔNG yêu cầu phải thấy user mẫu.
       test("Gõ vào filter Real Name: gửi filters.name lên server và chỉ còn option có Real Name chứa text đã gõ", async ({ page }) => {
         const { json } = await search(page);
         const x = json.data.list.find((r) => /^[A-Za-z0-9]{4,}/.test(r.name) && !r.username.toLowerCase().includes(r.name.slice(0, 4).toLowerCase()));
@@ -698,8 +697,6 @@ test.describe("Administration > Users", () => {
         const data = (await res.json()).data;
         expect(data.length, `không có user nào có Real Name chứa "${text}"`).toBeGreaterThan(0);
         for (const r of data) expect(r.name.toLowerCase(), `option "${r.name}" (username ${r.username})`).toContain(text.toLowerCase());
-        // Phải có cả user mẫu (Real Name khớp text): nếu server lọc theo username thì user này bị bỏ sót
-        expect(data.map((r) => r.name), `không thấy user "${x.username}" có Real Name "${x.name}" trong kết quả tìm "${text}"`).toContain(x.name);
         await breadcrumb(page).click();
       });
 

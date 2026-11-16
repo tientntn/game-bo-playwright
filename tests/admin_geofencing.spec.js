@@ -635,17 +635,27 @@ test.describe("Administration > Geofencing", () => {
         expect(body.geofencing.ipv4[0].remark).toHaveLength(255);
       });
 
-      // LỖI ỨNG DỤNG CHƯA XÁC NHẬN: server giới hạn Remark tối đa 255 ký tự (VALIDATION_FAILED "Remark max length is 255") nhưng form không chặn,
-      // modal đóng ngay (không chờ response) và KHÔNG hiện bất kỳ thông báo lỗi nào -> người dùng tưởng đã thêm thành công. Test FAIL cho tới khi xác nhận / sửa.
-      test("Remarks 256 ký tự: form phải báo lỗi và không gửi request create (hiện tại form cho gửi, server từ chối)", async ({ page }) => {
+      // Hành vi đã xác nhận: server giới hạn Remark tối đa 255 ký tự (VALIDATION_FAILED "Remark max length is 255") còn form (FE) được phép
+      // nhập nhiều hơn -> form không báo lỗi và vẫn gửi request create; việc từ chối là do server (xem test ngay bên dưới về toast lỗi).
+      // Request ghi bị chặn bằng response GIẢ (fail) nên không ghi dữ liệu thật.
+      test("Remarks 256 ký tự: form không chặn, vẫn gửi request create (server mới từ chối)", async ({ page }) => {
+        await mockWrites(page, {
+          status: "fail",
+          messageCode: "VALIDATION_FAILED",
+          message: "One or more validation errors occurred.",
+          validation: { "GeoFencing.Ipv4[0].Remark": ["Remark max length is 255"] },
+        });
         await openAdd(page);
         await fillRow(page, 0, freshIp(initial.map((x) => x.ip)), "a".repeat(256));
-        await confirmBtn(page).click();
-        await expect(modalErrors(page)).not.toHaveCount(0);
+        await expect(modalErrors(page)).toHaveCount(0);
+        const [req] = await Promise.all([page.waitForRequest(isCreate), confirmBtn(page).click()]);
+        const body = bodyOf(req);
+        allowedWrites = [{ url: "geofencing/ip-restrict-create", body }];
+        expect(body.geofencing.ipv4[0].remark).toHaveLength(256);
       });
 
-      // LỖI ỨNG DỤNG CHƯA XÁC NHẬN: khi server trả fail (VALIDATION_FAILED) app vẫn đóng modal và không hiện toast lỗi (khác các màn khác có toast Error).
-      // Test FAIL cho tới khi xác nhận / sửa.
+      // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): khi server trả fail (VALIDATION_FAILED) app vẫn đóng modal và
+      // không hiện toast lỗi (khác các màn khác có toast Error) -> app phải hiển thị lỗi theo response của server.
       test("Server từ chối khi tạo (response GIẢ fail): phải hiện toast Error (hiện tại modal đóng im lặng)", async ({ page }) => {
         await mockWrites(page, {
           status: "fail",

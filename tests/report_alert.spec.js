@@ -817,16 +817,17 @@ test.describe("Report > Alert Report", () => {
         hasText: exact(name),
       });
 
-    test("Popover liệt kê đủ cột cùng nút Reset to Default / Save", async ({ page }) => {
+    // Popover chỉ có danh sách cột (không có tiêu đề "Column Display", không có nút Save / Reset to Default)
+    test("Popover liệt kê đủ cột, đều được chọn; không có nút Save / Reset to Default", async ({ page }) => {
       await columnBtn(page).click();
-      await expect(columnPopover(page)).toContainText("Column Display");
-      await expect(columnPopover(page).getByRole("button", { name: "Reset to Default" })).toBeVisible();
-      await expect(columnPopover(page).getByRole("button", { name: "Save" })).toBeVisible();
+      await expect(columnPopover(page)).toBeVisible();
 
       const names = await columnPopover(page)
         .locator(".NextGen-popover-manage-column__list__items .ant-typography")
         .allInnerTexts();
       expect(names.map((n) => n.trim())).toEqual(COLUMNS);
+      await expect(columnPopover(page).locator("input[type=checkbox]:checked")).toHaveCount(COLUMNS.length);
+      await expect(columnPopover(page).getByRole("button")).toHaveCount(0);
     });
 
     test("Bỏ chọn 1 cột -> cột ẩn khỏi bảng, chọn lại -> hiện lại", async ({ page }) => {
@@ -839,24 +840,13 @@ test.describe("Report > Alert Report", () => {
       expect(await headers(page)).toEqual(COLUMNS);
     });
 
-    test("Save đóng popover và lưu cấu hình cột (giữ nguyên sau khi reload)", async ({ page }) => {
+    // Không có nút Save / Reset to Default: cấu hình cột KHÔNG được lưu, reload trang (F5) thì hiện lại đủ cột
+    test("Cấu hình cột KHÔNG được lưu: reload trang thì hiện lại đủ cột", async ({ page }) => {
       await columnBtn(page).click();
       await item(page, "Rule Name").locator("label").click();
-      await columnPopover(page).getByRole("button", { name: "Save" }).click();
-      await expect(columnPopover(page)).toBeHidden();
+      expect(await headers(page)).not.toContain("Rule Name");
 
       await openPage(page); // reload
-      expect(await headers(page)).not.toContain("Rule Name");
-      expect(await headers(page)).toHaveLength(COLUMNS.length - 1);
-    });
-
-    test("Reset to Default khôi phục toàn bộ cột", async ({ page }) => {
-      await columnBtn(page).click();
-      await item(page, "Win Rate").locator("label").click();
-      await item(page, "Severity").locator("label").click();
-      expect(await headers(page)).toHaveLength(COLUMNS.length - 2);
-
-      await columnPopover(page).getByRole("button", { name: "Reset to Default" }).click();
       expect(await headers(page)).toEqual(COLUMNS);
     });
 

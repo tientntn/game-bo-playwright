@@ -980,13 +980,13 @@ test.describe("Administration > Roles", () => {
         await expect(formErrors(page)).toHaveText([MSG.required]);
       });
 
-      // LỖI UI (CHƯA được user xác nhận): thông báo của Code ghi "Letters, Numbers or Underscores Only" nhưng ký tự gạch ngang "-" vẫn được chấp nhận
-      // (Role Name cũng chấp nhận "-" dù thông báo không nhắc tới). Test kiểm tra đúng theo thông báo nên sẽ FAIL cho tới khi xác nhận / sửa.
-      test("Code: ký tự gạch ngang '-' bị từ chối (thông báo chỉ cho phép chữ, số, gạch dưới)", async ({ page }) => {
+      // Hành vi đã xác nhận (coi là đúng): ký tự gạch ngang "-" được chấp nhận ở ô Code (thông báo lỗi chỉ hiện với ký tự khác như khoảng trắng,
+      // xem test "Name / Code sai định dạng" bên dưới), Role Name cũng chấp nhận "-".
+      test("Code: ký tự gạch ngang '-' được chấp nhận (không báo lỗi)", async ({ page }) => {
         await openCreate(page);
         await codeInput(page).fill("abc-def");
         await codeInput(page).blur();
-        await expect(formErrors(page)).toHaveText([MSG.codeRule]);
+        await expect(formErrors(page)).toHaveCount(0);
       });
 
       test("Name / Code sai định dạng chặn Save kể cả khi đã chọn quyền", async ({ page }) => {

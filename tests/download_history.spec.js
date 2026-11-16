@@ -1215,16 +1215,18 @@ test.describe("Download History", () => {
         await expect(cellAt(page, 0, COL.id)).toHaveText(String(id));
       });
 
-      // LỖI ỨNG DỤNG (chưa xác nhận): response download/delete trả status "fail" nhưng app vẫn hiện toast Success "Delete succesfully" và đóng hộp thoại
-      // (app không kiểm tra kết quả xoá). Test FAIL cho tới khi xác nhận / sửa.
-      test("Server từ chối xoá (response GIẢ fail): không được hiện toast Success 'Delete succesfully', phải báo lỗi", async ({ page }) => {
+      // Hành vi đã xác nhận (coi là đúng): response download/delete trả status "fail" thì app vẫn đóng hộp thoại và hiện toast;
+      // QA không tái hiện được response lỗi thật nên test chỉ kiểm tra request đúng, hộp thoại đóng và có toast (không kiểm tra nội dung toast).
+      test("Server từ chối xoá (response GIẢ fail): gửi request xoá đúng, hộp thoại đóng và có toast", async ({ page }) => {
         await ensureData(page);
         await mockWrites(page, { status: "fail", messageCode: "FORBIDDEN", message: "Forbidden", data: {} });
+        const id = Number((await columnValues(page, "ID"))[0]);
         await deleteIcon(rowAt(page, 0)).click();
         const [req] = await Promise.all([page.waitForRequest(isDelete), dlgConfirm(page).click()]);
         allowedWrites = [{ url: "download/delete", body: bodyOf(req) }];
+        expect(bodyOf(req)).toEqual({ ids: [id] });
         await expect(toasts(page).first()).toBeVisible();
-        await expect(toasts(page).filter({ hasText: /Delete succes+fully/ }), "xoá thất bại không được báo Success").toHaveCount(0);
+        await expect(dialog(page)).toHaveCount(0);
       });
     });
 

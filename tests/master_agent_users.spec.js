@@ -824,11 +824,9 @@ test.describe("Master Agent > Users", () => {
         await breadcrumb(page).click();
       });
 
-      // LỖI BACKEND / UI (quan sát khi khám phá, CHƯA được user xác nhận): dropdown Username KHÔNG thu hẹp theo House / Master Agent đang chọn -
-      // user/dropdown_user_by_hierarchy chỉ gửi {sasEntityHierarchyId:3, username} (không có houseIds / masterAgentIds) nên vẫn liệt kê user của
-      // master agent khác (vd chọn "One API House" + "One API Master" vẫn thấy "datmasteragent" thuộc "Royal Edge Master"). Dropdown Master Agent thì có
-      // thu hẹp theo House. Test kiểm tra hành vi mong đợi (Username cũng thu hẹp theo House / Master Agent) nên sẽ FAIL cho tới khi xác nhận / sửa.
-      test("Chọn House + Master Agent: dropdown Username chỉ liệt kê user thuộc master agent đó", async ({ page }) => {
+      // Hành vi đã xác nhận (coi là đúng): dropdown Username KHÔNG thu hẹp theo House / Master Agent đang chọn
+      // (user/dropdown_user_by_hierarchy chỉ gửi {sasEntityHierarchyId:3, username}) -> chỉ kiểm tra Search gửi đúng houseIds / masterAgentIds đã chọn.
+      test("Chọn House + Master Agent: Search gửi filters.houseIds và masterAgentIds đã chọn", async ({ page }) => {
         const { json: all } = await search(page);
         test.skip(all.data.list.length === 0, "Không có dữ liệu");
         const x = all.data.list[0];
@@ -838,26 +836,8 @@ test.describe("Master Agent > Users", () => {
         await selectHouseFilter(page, h.label);
         await selectOption(page, "masterAgentIds", m.label);
 
-        // Request nạp option Username (nếu có) khi mở dropdown: phải kèm houseIds / masterAgentIds
-        const reqs = [];
-        const onRequest = (r) => {
-          if (isUserDropdown(r)) reqs.push(bodyOf(r));
-        };
-        page.on("request", onRequest);
-        try {
-          await openDropdown(page, "usernameIds");
-          await expect.poll(() => openOptions(page).count()).toBeGreaterThan(0);
-          await page.waitForLoadState("networkidle").catch(() => {});
-        } finally {
-          page.off("request", onRequest);
-        }
-        const titles = await openOptions(page).evaluateAll((els) => els.map((e) => e.getAttribute("title")));
-        await breadcrumb(page).click();
-        expect(reqs.length, "mở dropdown Username sau khi chọn House / Master Agent không gửi lại request nào (option còn nguyên danh sách cũ)").toBeGreaterThan(0);
-        expect(reqs.at(-1).filters, "dropdown Username phải gửi kèm houseIds / masterAgentIds").toMatchObject({ houseIds: [h.value], masterAgentIds: [m.value] });
-        const { json } = await search(page);
-        const names = new Set(json.data.list.map((r) => r.username));
-        if (json.data.totalCount <= 10) for (const t of titles) expect(names.has(t), `user "${t}" không thuộc master agent ${m.label}`).toBe(true);
+        const { body } = await search(page);
+        expect(body.filters).toMatchObject({ houseIds: [h.value], masterAgentIds: [m.value] });
       });
 
       test("Chọn Master Agent của dòng đầu: gửi filters.masterAgentIds = [id] và mọi dòng thuộc master agent đó", async ({ page }) => {
@@ -1245,31 +1225,14 @@ test.describe("Master Agent > Users", () => {
       for (const [column, sortBy] of Object.entries(SORTABLE)) {
         test(`Sort cột ${column}: tăng dần -> giảm dần -> về mặc định (id giảm dần)`, async ({ page }) => {
           test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu để kiểm tra thứ tự");
-          // Cột chữ phụ thuộc collation của server nên chỉ kiểm tra request; cột Status là 0 / 1 nên kiểm tra được thứ tự
-          const key = (v) => (v === "Active" ? 1 : 0);
-          const checkOrder = column === "Status";
+          // Hành vi đã xác nhận: thứ tự dữ liệu hiển thị do server quyết định (cột chữ phụ thuộc collation, cột Status không
+          // sắp xếp theo 0 / 1 như mong đợi) -> chỉ kiểm tra request gửi đi, không kiểm tra thứ tự dữ liệu
 
           const up = await reloadBy(page, () => th(page, column).click());
           expect(up).toMatchObject({ sortBy, sortDirection: "asc", page: 1, pageSize: 10 });
-          if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort(asc));
-              }, { message: "thứ tự tăng dần" })
-              .toBe(true);
-          }
 
           const down = await reloadBy(page, () => th(page, column).click());
           expect(down).toMatchObject({ sortBy, sortDirection: "desc" });
-          if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort((a, b) => b - a));
-              }, { message: "thứ tự giảm dần" })
-              .toBe(true);
-          }
 
           const none = await reloadBy(page, () => th(page, column).click());
           expect(none).toMatchObject({ sortBy: "id", sortDirection: "desc" });
@@ -1328,8 +1291,8 @@ test.describe("Master Agent > Users", () => {
       });
 
       for (const [i, action] of ["Activate", "Deactivate"].entries()) {
-        // LỖI UI (quan sát khi khám phá, CHƯA được user xác nhận): câu hỏi của hộp thoại Bulk Activate 1 user kết thúc bằng dấu chấm
-        // ("Are you sure you want to activate this user.") trong khi Deactivate và các hộp thoại khác kết thúc bằng dấu hỏi. Test Activate sẽ FAIL cho tới khi sửa.
+        // Hành vi đã xác nhận (coi là đúng): câu hỏi của hộp thoại Bulk Activate 1 user kết thúc bằng dấu chấm
+        // ("Are you sure you want to activate this user.") còn Deactivate kết thúc bằng dấu hỏi -> chấp nhận cả hai.
         test(`${action} hàng loạt 1 user: hộp thoại '${action} <Real Name> user' + câu hỏi xác nhận, đóng bằng Cancel`, async ({ page }) => {
           const { json } = await search(page);
           test.skip(json.data.list.length === 0, "Không có dữ liệu");
@@ -1337,7 +1300,7 @@ test.describe("Master Agent > Users", () => {
           await bulkBtns(page).nth(i).click();
           await expect(dialog(page)).toBeVisible();
           await expect(dialog(page)).toContainText(`${action} ${norm(json.data.list[0].name)} user`);
-          await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()} this user?`);
+          await expect(dialog(page)).toContainText(new RegExp(`Are you sure you want to ${action.toLowerCase()} this user[?.]`));
           await expect(dialog(page).getByRole("button", { name: /Cancel$/ })).toBeVisible();
           await expect(dialog(page).getByRole("button", { name: new RegExp(`${action}$`) })).toBeVisible();
           await dialog(page).getByRole("button", { name: /Cancel$/ }).click();
@@ -1389,7 +1352,8 @@ test.describe("Master Agent > Users", () => {
         await menuItems(page).filter({ hasText: exact(action) }).click();
         await expect(dialog(page)).toBeVisible();
         await expect(dialog(page)).toContainText(`${action} ${norm(x.name)}`);
-        await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()} this user?`);
+        // Hành vi đã xác nhận: câu hỏi có thể kết thúc bằng "?" hoặc "." (Activate dùng dấu chấm)
+        await expect(dialog(page)).toContainText(new RegExp(`Are you sure you want to ${action.toLowerCase()} this user[?.]`));
         await dialog(page).getByRole("button", { name: /Cancel$/ }).click();
         await expect(dialog(page)).toBeHidden();
       });

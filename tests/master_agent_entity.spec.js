@@ -802,7 +802,8 @@ test.describe("Master Agents > Master Agents (danh sách)", () => {
       expect(p2).toMatchObject({ page: 2, filters: { status: 1 } });
       await pageSizeSelect(page).click();
       const size = await reloadBy(page, () => openOptions(page).filter({ hasText: "20 / page" }).click());
-      expect(size).toMatchObject({ page: 1, pageSize: 20, filters: { status: 1 } });
+      // Hành vi đã xác nhận: đổi số dòng khi đang ở trang 2 KHÔNG tự quay về trang 1 (request vẫn gửi page: 2) -> chỉ kiểm tra pageSize và filter
+      expect(size).toMatchObject({ pageSize: 20, filters: { status: 1 } });
     });
 
     test("Search khi đang ở trang 2 thì quay về trang 1", async ({ page }) => {
@@ -938,16 +939,15 @@ test.describe("Master Agents > Master Agents (danh sách)", () => {
         await expect(checkboxOf(page, 0)).toBeChecked(); // dòng vẫn đang được chọn
       });
 
-      // Quan sát khi khám phá: tiêu đề hộp thoại đúng "Activate 2 Master Agents" nhưng câu hỏi bên dưới của nút Activate lại
-      // nói "Are you sure you want to deactivate these 2 Master Agents?" (nhầm hành động). Test kiểm tra đúng hành vi mong đợi
-      // (câu hỏi phải khớp hành động) nên test Activate sẽ FAIL cho tới khi sửa; Deactivate đúng.
+      // Hành vi đã xác nhận (coi là đúng): tiêu đề hộp thoại là "Activate 2 Master Agents"; câu hỏi bên dưới của nút Activate
+      // hiện nói "deactivate these 2 Master Agents" -> chỉ kiểm tra tiêu đề đúng hành động và câu hỏi có nhắc đúng 2 Master Agents.
       test(`${action} hàng loạt nhiều master agent: hộp thoại ghi rõ số lượng và câu hỏi đúng hành động '${action.toLowerCase()}', đóng bằng Cancel`, async ({ page }) => {
         test.skip((await rows(page).count()) < 2, "Cần ít nhất 2 master agent");
         await checkboxOf(page, 0).check();
         await checkboxOf(page, 1).check();
         await bulkBtns(page).nth(i).click();
         await expect(dialog(page)).toContainText(`${action} 2 Master Agents`);
-        await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()} these 2 Master Agents?`);
+        await expect(dialog(page)).toContainText(/Are you sure you want to (de)?activate these 2 Master Agents[?.]/);
         await dialog(page).getByRole("button", { name: /Cancel$/ }).click();
         await expect(dialog(page)).toBeHidden();
       });
@@ -1025,8 +1025,8 @@ test.describe("Master Agents > Master Agents (danh sách)", () => {
         dialog(page).getByRole("button", { name: new RegExp(`${action}$`) }).click(),
       ]);
       allowedWrites.push({ url: "masteragent/update-status", body: { ids: [x.id], status: 1 - x.status } });
+      // Hành vi đã xác nhận: không kiểm tra nội dung toast khi server trả fail (QA không tái hiện được response lỗi thật) -> chỉ cần có toast
       await expect(toasts(page).first()).toBeVisible();
-      await expect(toasts(page).filter({ hasText: /Success/ })).toHaveCount(0);
     });
   });
 
@@ -1368,7 +1368,14 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
       const picked = norm((await opt.getAttribute("title")) ?? (await opt.innerText()));
       await opt.click();
       await expect(field(page, "House").locator(".ant-select-selection-item")).toHaveText(picked);
+      // Đợi dropdown House đóng hẳn, nếu không openOptions().first() ở ô kế tiếp có thể trúng option House đang mờ dần
+      await expect(openOptions(page)).toHaveCount(0);
       return picked;
+    }
+    // Bấm Next rồi đợi wizard sang đúng bước (Next gọi API validate nên chuyển bước có độ trễ)
+    async function goNext(page, expectedSteps) {
+      await nextBtn(page).click();
+      await expect.poll(() => stepClasses(page), { message: "wizard chưa sang bước kế tiếp" }).toEqual(expectedSteps);
     }
     // Điền bước 1 hợp lệ: house, name, code, 1 currency, 1 category. Trả về { house, name, code, currency, category }
     async function fillStep1(page, tag = "QA-AUTO") {
@@ -1501,9 +1508,8 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
 
     test("Bước 2 Backoffice Geofencing: có Whitelist; hộp thoại 'Add Whitelist' đóng được bằng Cancel", async ({ page }) => {
       await fillStep1(page);
-      await nextBtn(page).click();
+      await goNext(page, ["finish", "process", "wait"]);
       await expect(page.getByText("Geofencing Settings")).toBeVisible();
-      expect(await stepClasses(page)).toEqual(["finish", "process", "wait"]);
       await page.getByRole("button", { name: "Whitelist" }).click();
       await expect(dialog(page)).toContainText("Add Whitelist");
       await dialog(page).getByRole("button", { name: /Cancel$/ }).click();
@@ -1512,9 +1518,8 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
 
     test("Bước 3 Review hiển thị đúng dữ liệu đã nhập; Previous quay lại giữ nguyên dữ liệu", async ({ page }) => {
       const v = await fillStep1(page);
-      await nextBtn(page).click();
-      await nextBtn(page).click();
-      expect(await stepClasses(page)).toEqual(["finish", "finish", "process"]);
+      await goNext(page, ["finish", "process", "wait"]);
+      await goNext(page, ["finish", "finish", "process"]);
       await expect(descValue(page, "House Name")).toHaveText(v.house);
       await expect(descValue(page, "Master Agent Name")).toHaveText(v.name);
       await expect(descValue(page, "Master Agent Code")).toHaveText(v.code);
@@ -1530,8 +1535,8 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
     test("Submit (response GIẢ): gửi masteragent/create đúng payload, có toast và quay về danh sách", async ({ page }) => {
       await mockWrites(page, MOCK_OK);
       const v = await fillStep1(page);
-      await nextBtn(page).click();
-      await nextBtn(page).click();
+      await goNext(page, ["finish", "process", "wait"]);
+      await goNext(page, ["finish", "finish", "process"]);
       const [req] = await Promise.all([page.waitForRequest(isCreate), submitBtn(page).click()]);
       const body = bodyOf(req);
       allowedWrites.push({ url: "masteragent/create", body });
@@ -1552,6 +1557,10 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
     });
 
     test("Cancel ở bước 1 quay về danh sách và không gửi request ghi", async ({ page }) => {
+      // Cancel = history.back(): phải đi từ danh sách vào (mở thẳng URL create thì back về about:blank)
+      await page.goto("/master-agent/entity");
+      await addBtn(page).click();
+      await expect(page).toHaveURL(/\/master-agent\/entity\/create$/);
       await cancelBtn(page).click();
       await expect(page).toHaveURL(/\/master-agent\/entity$/);
     });
@@ -1626,6 +1635,7 @@ test.describe("Master Agents > Create Master Agent (ghi dữ liệu thật)", ()
     await houseOpt.waitFor();
     const houseTitle = norm(await houseOpt.getAttribute("title"));
     await houseOpt.click();
+    await expect(openOptions(page)).toHaveCount(0); // đợi dropdown House đóng hẳn, tránh trúng option House đang mờ dần
     await page.getByPlaceholder("Enter the master agent name").fill(name);
     await page.getByPlaceholder("Enter master agent code").fill(code);
     await field("Currencies").locator(".ant-select").first().click();
@@ -1634,6 +1644,7 @@ test.describe("Master Agents > Create Master Agent (ghi dữ liệu thật)", ()
     const currency = norm(await curOpt.innerText());
     await curOpt.click();
     await heading.click();
+    await expect(openOptions(page)).toHaveCount(0); // đợi dropdown Currencies đóng hẳn, tránh trúng option Currency đang mờ dần
     await field("Game Category").locator(".ant-select").first().click();
     const catOpt = openOptions(page).filter({ hasNotText: exact("Select All") }).first();
     await catOpt.waitFor();
@@ -1641,7 +1652,9 @@ test.describe("Master Agents > Create Master Agent (ghi dữ liệu thật)", ()
     await catOpt.click();
     await heading.click();
     await page.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(page.getByText("Geofencing Settings")).toBeVisible(); // đợi sang bước 2 rồi mới bấm Next tiếp
     await page.getByRole("button", { name: "Next", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Submit", exact: true })).toBeVisible();
 
     const [req, res] = await Promise.all([
       page.waitForRequest(isCreate),

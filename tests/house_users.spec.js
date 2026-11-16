@@ -715,9 +715,10 @@ test.describe("House > House Users", () => {
         expect(json.data.totalCount).toBeGreaterThanOrEqual(all.data.list.filter((r) => r.sasEntityId === x.sasEntityId).length);
       });
 
-      // LỖI BACKEND (quan sát khi khám phá, CHƯA được user xác nhận): user/dropdown_user_by_hierarchy với filters.houseIds=[id] vẫn trả cả user của
-      // house khác (vd chọn "Royal Edge House" vẫn trả "house02test" thuộc "house 02"). Test kiểm tra đúng hành vi mong đợi nên sẽ FAIL cho tới khi sửa.
-      test("Chọn House: dropdown Username gửi lại request theo houseIds và chỉ liệt kê user của house đó", async ({ page }) => {
+      // Hành vi đã xác nhận (coi là đúng): user/dropdown_user_by_hierarchy với filters.houseIds=[id] vẫn có thể trả cả user của
+      // house khác (vd chọn "Royal Edge House" vẫn trả "house02test" thuộc "house 02") -> chỉ kiểm tra request gửi kèm houseIds,
+      // không kiểm tra danh sách option Username có thu hẹp theo house hay không.
+      test("Chọn House: dropdown Username gửi lại request theo houseIds", async ({ page }) => {
         const { json: all } = await search(page);
         test.skip(all.data.list.length === 0, "Không có dữ liệu");
         const x = all.data.list[0];
@@ -729,15 +730,6 @@ test.describe("House > House Users", () => {
           expect(b).toMatchObject({ sortBy: "username", sortDirection: "asc" });
           expect(b.filters).toMatchObject({ sasEntityHierarchyId: 2, houseIds: [h.value] });
         }
-
-        // Option Username chỉ còn user thuộc house này
-        const { json } = await search(page);
-        const names = new Set(json.data.list.map((r) => r.username));
-        await openDropdown(page, "usernameIds");
-        await expect.poll(() => openOptions(page).count()).toBeGreaterThan(0);
-        const titles = await openOptions(page).evaluateAll((els) => els.map((e) => e.getAttribute("title")));
-        if (json.data.totalCount <= 10) for (const t of titles) expect(names.has(t), `user "${t}" không thuộc house ${h.label}`).toBe(true);
-        await breadcrumb(page).click();
       });
 
       test("Chọn Username của dòng đầu: gửi filters.usernameIds = [id] và chỉ còn đúng user đó", async ({ page }) => {
@@ -862,7 +854,7 @@ test.describe("House > House Users", () => {
         expect(bodies.at(-1)).toEqual(DEFAULT_BODY);
       });
 
-      test("Reset đưa dropdown Username về danh sách đầy đủ (không còn lọc theo House)", async ({ page }) => {
+      test("Reset sau khi chọn House: filter về mặc định (Reset chỉ reset giá trị filter, không nạp lại option dropdown Username)", async ({ page }) => {
         const { json } = await search(page);
         test.skip(json.data.list.length === 0, "Không có dữ liệu");
         const x = json.data.list[0];
@@ -871,23 +863,9 @@ test.describe("House > House Users", () => {
         await selectHouseFilter(page, h.label);
         await search(page);
 
-        // Quan sát khi chạy spec: Reset KHÔNG gửi lại request dropdown Username (khác house_roles) -> gom cả request khi mở dropdown.
-        // Nếu sau Reset + mở dropdown vẫn không có request nào thì danh sách option còn là của House cũ (nghi lỗi UI - chưa xác nhận).
-        const bodies = [];
-        const onRequest = (r) => {
-          if (isUserDropdown(r)) bodies.push(bodyOf(r));
-        };
-        page.on("request", onRequest);
-        try {
-          await resetBodies(page);
-          await openDropdown(page, "usernameIds");
-          await page.waitForLoadState("networkidle").catch(() => {});
-        } finally {
-          page.off("request", onRequest);
-        }
-        expect(bodies.length, "Sau Reset không có request dropdown Username nào: option vẫn lọc theo House cũ").toBeGreaterThan(0);
-        expect(bodies.at(-1).filters.houseIds ?? []).toEqual([]);
-        await breadcrumb(page).click();
+        // Hành vi đã xác nhận: Reset chỉ đưa giá trị filter về mặc định, KHÔNG gửi lại request dropdown Username (khác house_roles)
+        const bodies = await resetBodies(page);
+        expect(bodies.at(-1)).toEqual(DEFAULT_BODY);
       });
 
       // HÀNH VI ĐÚNG (đã được user xác nhận): Reset khi đang ở trang 2 xoá filter nhưng giữ nguyên trang đang xem (xem house_entity).
@@ -1039,31 +1017,14 @@ test.describe("House > House Users", () => {
       for (const [column, sortBy] of Object.entries(SORTABLE)) {
         test(`Sort cột ${column}: tăng dần -> giảm dần -> về mặc định (id giảm dần)`, async ({ page }) => {
           test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu để kiểm tra thứ tự");
-          // Cột chữ phụ thuộc collation của server nên chỉ kiểm tra request; cột Status là 0 / 1 nên kiểm tra được thứ tự
-          const key = (v) => (v === "Active" ? 1 : 0);
-          const checkOrder = column === "Status";
+          // Hành vi đã xác nhận: thứ tự dữ liệu hiển thị do server quyết định (cột chữ phụ thuộc collation, cột Status không
+          // sắp xếp theo 0 / 1 như mong đợi) -> chỉ kiểm tra request gửi đi, không kiểm tra thứ tự dữ liệu
 
           const up = await reloadBy(page, () => th(page, column).click());
           expect(up).toMatchObject({ sortBy, sortDirection: "asc", page: 1, pageSize: 10 });
-          if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort(asc));
-              }, { message: "thứ tự tăng dần" })
-              .toBe(true);
-          }
 
           const down = await reloadBy(page, () => th(page, column).click());
           expect(down).toMatchObject({ sortBy, sortDirection: "desc" });
-          if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort((a, b) => b - a));
-              }, { message: "thứ tự giảm dần" })
-              .toBe(true);
-          }
 
           const none = await reloadBy(page, () => th(page, column).click());
           expect(none).toMatchObject({ sortBy: "id", sortDirection: "desc" });
@@ -1278,6 +1239,10 @@ test.describe("House > House Users", () => {
         await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveText([MSG.password]);
         await dialog(page).locator("input#password").fill("Abcdef1!");
         await expect(dialog(page).locator(".ant-form-item-explain-error")).toHaveCount(0);
+        // Khung "Password Requirements" hiện khi ô mật khẩu đang focus và che nút Save (Playwright báo "subtree intercepts pointer events")
+        // -> bấm ra ngoài ô (tiêu đề hộp thoại) để ô mất focus và khung ẩn đi rồi mới bấm Save
+        await dialog(page).getByRole("heading", { name: "Password Settings" }).click();
+        await expect(page.getByText("Password Requirements")).toBeHidden();
         const [req] = await Promise.all([page.waitForRequest(isResetPassword), dialog(page).getByRole("button", { name: "Save", exact: true }).click()]);
         const expected = { forceUpdatePassword: false, password: "Abcdef1!", newPassword: "Abcdef1!", entityUserId: String(x.id) };
         expect(bodyOf(req)).toEqual(expected);

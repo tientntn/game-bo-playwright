@@ -308,11 +308,14 @@ function watchWrites(page) {
   return writes;
 }
 
-// Mở menu "..." của dòng thứ i, trả về locator của menu
+// Mở menu "..." của dòng thứ i, trả về locator của menu.
+// Hành vi của FE: menu có thể bị đóng ngay khi bảng render lại sau lần tải -> chưa thấy menu thì bấm lại (không bấm khi menu đang mở để khỏi đóng nó)
 async function openRowMenu(page, i) {
-  await rowAt(page, i).locator("td").last().locator("button").click();
   const menu = page.locator(".ant-dropdown:not(.ant-dropdown-hidden)");
-  await expect(menu).toBeVisible();
+  await expect(async () => {
+    if (!(await menu.isVisible())) await rowAt(page, i).locator("td").last().locator("button").click();
+    await expect(menu).toBeVisible({ timeout: 3000 });
+  }).toPass({ timeout: 30000 });
   return menu;
 }
 // Chữ của các mục menu (bỏ ký tự "x" của icon ở mục End Maintenance)
@@ -1139,8 +1142,13 @@ test.describe("Games > Games", () => {
       const { json } = await search(page);
       const found = findGame(json, (g) => g.status === 1 && g.maintenance === 0);
       test.skip(!found, "Không có game Active / Normal Operation ở trang đầu");
-      const menu = await openRowMenu(page, found.index);
-      expect(await menuItems(menu)).toEqual([
+      // Menu có thể đóng lại khi bảng render lại (hành vi của FE) -> mở lại tới khi đọc được các mục rồi mới so sánh
+      let items = [];
+      await expect(async () => {
+        items = await menuItems(await openRowMenu(page, found.index));
+        expect(items.length, "Menu '...' chưa hiện mục nào").toBeGreaterThan(0);
+      }).toPass({ timeout: 30000 });
+      expect(items).toEqual([
         "Download",
         "Set to Maintenance",
         "Deactivate",
