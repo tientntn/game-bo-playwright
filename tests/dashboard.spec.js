@@ -30,8 +30,14 @@
 //     còn Game Summary mặc định "No" chỉ là -7.5M). Nếu để mặc định "No" số liệu sẽ không khớp.
 //   - Top 10 Games : mỗi cột = tổng cột tương ứng của game đó trên Game Summary (Bet Count -> Total Bet Count,
 //     Turnover -> Total ETO, GGR -> Total GGR) và đúng là các game đứng đầu (GGR: cao nhất -> thấp nhất, kể cả khi âm).
+//     Ngoài ra đối chiếu với "Summation By Currency": tổng mọi dòng = Total Bet Count / Total ETO / Total GGR, tổng các cột chart
+//     không vượt Summation (Bet Count, Turnover), currency có <= 10 game thì tổng các cột chart = Summation.
 //   - Top 10 GGR by Currencies : mỗi cột = Total GGR của "Summation By Currency" khi lọc đúng currency đó.
 //   - GGR (line chart) : tổng các điểm = Total GGR của cả khoảng ngày; từng điểm = tổng GGR các dòng của ngày đó.
+//
+// Dữ liệu dev đang có bet phát sinh liên tục (vd bot đặt cược Crossy Chicks / TKN): chart đọc trước, Game Summary đọc sau vài chục giây
+// và Dashboard cập nhật chậm hơn Game Summary nên Bet Count có thể lệch vài đơn vị trong lúc đang có bet (vd chart 9,898 / Game
+// Summary 9,900), hết bet thì khớp tuyệt đối. Nếu chỉ lệch vài đơn vị: chạy lại test, đừng vội coi là lỗi ứng dụng.
 //
 // Làm tròn: dữ liệu trong chart vẫn đủ 4 chữ số thập phân (khớp 100% response API), nhãn vẽ trên canvas thì làm tròn 3 chữ số
 // (vd 3,722,512.6068 -> 3,722,512.607). Vì vậy so với Summation dùng dung sai 0.0005; so với tổng các dòng (mỗi dòng đã làm tròn
@@ -448,6 +454,26 @@ function compareTopGames(code, metric, chart, rows) {
   });
 }
 
+// Top 10 Games so với bảng "Summation By Currency" (Total Bet Count / Total ETO / Total GGR của cả currency):
+//  - tổng mọi dòng Game Summary = số trên Summation (đảm bảo "tổng các game" dùng ở trên đúng là số Summation)
+//  - Bet Count / Turnover luôn >= 0: tổng các cột chart không được vượt Summation
+//  - currency có <= 10 game thì chart phải đủ các game đó: tổng các cột chart = Summation
+function compareTopGamesWithSummation(code, metric, chart, rows, totals) {
+  const at = `${code} / ${metric.name}`;
+  const summation = num(totals[metric.summation]);
+  // Bet Count là số nguyên -> khớp tuyệt đối; còn lại mỗi dòng đã làm tròn 4 chữ số nên cộng dồn có thể lệch nhẹ
+  const tolRows = metric.digits === 0 ? 0 : Math.max(TOL_SUMMATION, rows.length * 0.00005);
+  expectClose(sum(rows.map((r) => r[metric.rowKey])), summation, tolRows, `[${at}] tổng các dòng Game Summary so với ${metric.summation}`);
+
+  if (metric.name === "GGR") return; // GGR có thể âm: tổng Top 10 không có quan hệ <= tổng cả currency
+  const chartTotal = sum(chart.values);
+  expect.soft(chartTotal, `[${at}] tổng các cột chart không được vượt ${metric.summation} (${summation})`).toBeLessThanOrEqual(
+    summation + tolRows,
+  );
+  const gameCount = Object.keys(groupSum(rows, "gameName", metric.rowKey)).length;
+  if (gameCount <= 10) expectClose(chartTotal, summation, TOL_ROWS, `[${at}] ${gameCount} game: tổng các cột chart so với ${metric.summation}`);
+}
+
 // GGR từng ngày của line chart = tổng GGR các dòng Game Summary của ngày đó
 function compareTrendPerDay(code, trend, rows) {
   const perDay = groupSum(rows, "date", "totalGgr");
@@ -648,9 +674,13 @@ test.describe("Dashboard - So sánh với Game Summary (theo chart: mọi curren
     // Bước 2: Game Summary của từng currency rồi so với chart
     await openGameSummary(page);
     for (const [i, code] of codes.entries()) {
-      const { rows } = await loadGameSummary(page, code, { reset: i > 0 });
+      const { rows, totals } = await loadGameSummary(page, code, { reset: i > 0 });
       expect.soft(rows.length, `Game Summary không có dòng nào cho ${code}`).toBeGreaterThan(0);
-      for (const metric of METRICS) compareTopGames(code, metric, charts[code][metric.name].chart, rows);
+      for (const metric of METRICS) {
+        const { chart } = charts[code][metric.name];
+        compareTopGames(code, metric, chart, rows);
+        compareTopGamesWithSummation(code, metric, chart, rows, totals);
+      }
     }
   });
 
@@ -741,8 +771,12 @@ test.describe("Dashboard - Đối chiếu cố định: TKN / Samba Bonanza", ()
     const charts = await collectTopGames(page, dash, FIXED_CURRENCY, { metric: METRICS[0] });
 
     await openGameSummary(page);
-    const { rows } = await loadGameSummary(page, FIXED_CURRENCY);
-    for (const metric of METRICS) compareTopGames(FIXED_CURRENCY, metric, charts[metric.name].chart, rows);
+    const { rows, totals } = await loadGameSummary(page, FIXED_CURRENCY);
+    for (const metric of METRICS) {
+      const { chart } = charts[metric.name];
+      compareTopGames(FIXED_CURRENCY, metric, chart, rows);
+      compareTopGamesWithSummation(FIXED_CURRENCY, metric, chart, rows, totals);
+    }
   });
 
   test(`${FIXED_CURRENCY}: cột Top 10 GGR by Currencies = tổng GGR line chart = Total GGR của Game Summary`, async ({
