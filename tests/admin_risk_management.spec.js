@@ -33,6 +33,7 @@
 //      * afterEach kiểm tra mọi request ghi chỉ nhắm vào rule QA (create: name QA-AUTO-...; update / deactivate: id = id rule QA).
 //  - Không hard-code dữ liệu: rule / category / game đều lấy từ response list và dropdown.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -44,7 +45,6 @@ test.use({
 });
 
 const URL = "/admin/risk-management";
-const ORIGIN = "https://dev-bo.royaledge.io";
 const QA_PREFIX = "QA-AUTO-";
 
 // Đúng thứ tự hiển thị
@@ -119,11 +119,6 @@ const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 const asc = (a, b) => a - b;
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 
 // Bảng chính (luôn là .ant-table đầu tiên trong DOM; bảng trong modal nằm sau)
 const table = (page) => page.locator(".ant-table").first();
@@ -137,7 +132,6 @@ const itemsBtn = (page, i, col) => cellAt(page, i, col).getByRole("button");
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const titleEl = (page) => page.locator(".Breadcrumb__itemFinal"); // chữ tiêu đề cuối của breadcrumb (không phải link)
@@ -145,24 +139,10 @@ const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-contro
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const modal = (page) => page.locator(".ant-modal-content");
 const toasts = (page) => page.locator(".Toastify__toast");
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi vừa vào / quay lại danh sách app có thể gửi nhiều request list liên tiếp (vd filters {} rồi filters đã lưu):
-// chờ mạng yên sau mỗi lần gọi để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên xong
 async function openPage(page) {
@@ -241,12 +221,6 @@ const tableMatrix = (page) =>
       lines: [...tr.children].map((td) => [...td.querySelectorAll("div")].map((d) => d.innerText.trim())),
     })),
   );
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn -> xoá mất giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo text) của filter dạng dropdown rồi đóng dropdown.
 async function selectOption(page, id, text) {

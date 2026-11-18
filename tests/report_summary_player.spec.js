@@ -10,6 +10,7 @@
 // Không hard-code dữ liệu (player, game, currency...) - mọi giá trị đều lấy từ chính dòng đầu tiên
 // của báo cáo để test không phụ thuộc vào data trên môi trường dev.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown, waitTableIdle } = require("./helpers/ui");
 
 const URL = "/report/summary-player";
 const FREE_SPIN_TAB = "Free Spin or Buy Bonus";
@@ -80,7 +81,6 @@ const conversionTable = (page) => page.locator(".ant-table").filter({ hasText: "
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const pageTitle = (page) =>
   page.getByRole("navigation").getByText("Player Summary Report");
 const filterToggle = (page) =>
@@ -91,17 +91,9 @@ const columnBtn = (page) =>
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const tab = (page, name) => page.getByRole("tab", { name });
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 // Ô "Filter Type" (Day / Month) nằm ngoài thanh filter
 const filterTypeEl = (page) =>
   page.locator(".ant-select").filter({ has: page.locator("#filterType") });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -173,13 +165,6 @@ const exact = (name) => new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\/]/g, 
 async function fillFilter(page, id, value) {
   await filterEl(page, id).locator("label").first().click();
   await page.locator(`#${id}`).fill(value);
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn option (theo title) của filter dạng dropdown, rồi đóng dropdown.

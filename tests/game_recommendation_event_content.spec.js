@@ -39,6 +39,7 @@
 //  - Sort cột Master Agent / Agent: UI gửi sortBy "masterAgentName" / "agentName" nhưng backend trả về đúng thứ tự mặc định (id giảm dần)
 //    cho cả asc lẫn desc -> test chỉ kiểm tra request và bảng khớp response, không kiểm tra thứ tự dữ liệu.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, bodyOf, openDropdown, waitTableIdle } = require("./helpers/ui");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 const { buildStorageState } = require("./helpers/session");
 
@@ -86,12 +87,6 @@ const isMasterDropdown = endsWith("/report/master_agent_dropdown");
 const isAgentDropdown = endsWith("/report/agent_dropdown");
 const isLanguageDropdown = endsWith("/dropdown/language");
 
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
-
 // Dòng chính của bảng: có nút mở rộng ở ô đầu (các dòng của bảng con / hộp thoại không có)
 const rows = (page) => page.locator("tr.ant-table-row:has(> td > button.ant-table-row-expand-icon)");
 const rowAt = (page, i) => rows(page).nth(i);
@@ -106,14 +101,12 @@ const viewBtn = (row) => row.getByRole("button", { name: "View Content" });
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: "plus Add New" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 // Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
 // Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
@@ -128,18 +121,9 @@ const hoverTip = async (page, target, text) => {
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
-
 // Header của bảng chính (bảng con khi mở rộng có thead riêng nên chỉ lấy thead đầu tiên)
 const mainHead = (page) => page.locator(".ant-table-thead").first();
 const th = (page, name) => mainHead(page).locator("th").filter({ hasText: exact(name) });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -212,11 +196,6 @@ async function columnValues(page, name) {
 
 // Text option của Master Agent / Agent / ngôn ngữ ở filter và Add/Update: "code - label"
 const optionText = (g) => `${g.code} - ${g.label}`;
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn 1 giá trị ở filter Master Agent / Agent (dropdown chọn 1, tự đóng sau khi chọn).
 // Gõ code vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị; chỉ lấy option khớp chính xác.

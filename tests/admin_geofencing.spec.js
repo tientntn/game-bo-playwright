@@ -27,6 +27,7 @@
 //    afterEach kiểm tra mọi request ghi chỉ nhắm vào IP / id của bản ghi QA đã tạo.
 //  - Không hard-code dữ liệu: IP dùng cho test lấy từ response list.
 const { test, expect } = require("@playwright/test");
+const { bodyOf, ORIGIN, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -38,7 +39,6 @@ test.use({
 });
 
 const URL = "/admin/geofencing";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị
 const COLUMNS = ["IP Address", "Country", "Remark", "Action"];
@@ -79,11 +79,6 @@ const isValidate = endsWith("/validate/ip");
 
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 // Bảng (header + body nằm trong cùng .NextGen-table)
@@ -121,16 +116,6 @@ const removeRowBtns = (page) => modalRows(page).locator("button");
 const delDialog = (page) => page.locator(".NextGen-modal-delete");
 const delConfirmBtn = (page) => delDialog(page).getByRole("button", { name: "Delete", exact: true });
 const delCancelBtn = (page) => delDialog(page).getByRole("button", { name: "Cancel", exact: true });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên xong. Trả về mảng data của geofencing/ip-restrict-list
 async function openPage(page) {

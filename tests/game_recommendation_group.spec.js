@@ -26,6 +26,7 @@
 //  - Dọn dẹp: test cuối xoá nhóm QA qua UI và kiểm tra nhóm biến mất; afterAll xoá nốt mọi nhóm QA còn sót (kể cả của lần
 //    chạy trước bị dừng giữa chừng) nếu test giữa chừng fail. Nhóm được xoá hẳn nên không để lại rác.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, openDropdown, waitTableIdle } = require("./helpers/ui");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 const { buildStorageState } = require("./helpers/session");
 
@@ -74,26 +75,15 @@ const toggleChip = (page, i) => cellAt(page, i, COL.games).locator('.ant-tag[sty
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: "plus Add New" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -171,11 +161,6 @@ async function chipInfo(page, i) {
   const toggle = await toggleChip(page, i).count();
   const more = toggle ? texts[texts.length - 1] : null;
   return { games: toggle ? texts.slice(0, -1) : texts, more };
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Text option của filter Game Name: "<code> - <label>"

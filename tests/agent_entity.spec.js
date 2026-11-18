@@ -33,6 +33,7 @@
 //  - Không hard-code dữ liệu: house / master agent / agent / currency / game category / id đều lấy từ response list và dropdown; id màn hình con
 //    lấy từ icon ở dòng.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -44,7 +45,6 @@ test.use({
 });
 
 const URL = "/agent/entity";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị (cột đầu tiên là checkbox chọn dòng, không có tên)
 const COLUMNS = ["ID", "Agent", "Code", "Login Code", "House", "Master Agent", "Game Category", "Site URL", "Currency", "Status", "Action"];
@@ -99,11 +99,6 @@ const isCategoryDropdown = endsWith("/dropdown/gamecategory");
 const exact = (s, flags = "") => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`, flags);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 
 const table = (page) => page.locator(".ant-table").first();
 const rows = (page) => table(page).locator("tbody tr.ant-table-row");
@@ -114,7 +109,6 @@ const checkboxOf = (page, i) => rowAt(page, i).locator('input[type="checkbox"]')
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -123,12 +117,10 @@ const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const bulkBtns = (page) => page.locator("button.NextGen-button-more-action__update");
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
-const dialog = (page) => page.getByRole("dialog");
 const toasts = (page) => page.locator(".Toastify__toast");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 
 // Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
 // Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
@@ -151,17 +143,6 @@ async function openRowMenu(page, i) {
 async function closeRowMenu(page) {
   await page.keyboard.press("Escape");
   await expect(menuItems(page)).toHaveCount(0);
-}
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
-// Search đôi khi gửi 2 request list giống hệt nhau: chờ mạng yên để request thừa không bị nhầm là của thao tác kế tiếp
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
 }
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
@@ -235,12 +216,6 @@ async function columnValues(page, name) {
 
 // Chip (span) của 1 ô Game Category / Currency trong bảng
 const chipsOf = (page, i, col) => cellAt(page, i, col).locator("span").allInnerTexts().then((a) => a.map(norm));
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô. KHÔNG click giữa ô: ô chọn nhiều có chip
-// "Tên ×" và tâm ô thường rơi đúng nút (x) -> xoá giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn 1 option (theo text hiển thị) ở filter rồi đóng dropdown. Dropdown chọn nhiều không tự đóng và Esc không đóng
 // -> click ra ngoài (breadcrumb). Gõ text vào ô tìm kiếm để option chắc chắn có trong DOM.

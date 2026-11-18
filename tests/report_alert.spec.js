@@ -13,6 +13,7 @@
 // Màn hình không có nút Export.
 // Không hard-code dữ liệu (người chơi, game, rule...) - mọi giá trị lấy từ chính dòng đầu tiên của báo cáo.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown, waitTableIdle } = require("./helpers/ui");
 
 const URL = "/report/alert";
 
@@ -67,22 +68,13 @@ const rowAt = (page, i) => rows(page).nth(i);
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#fromTime_dateRange");
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -162,13 +154,6 @@ function parseDay(s) {
   return new Date(Date.UTC(y, m - 1, d));
 }
 const diffDays = (a, b) => Math.round((a - b) / 86400000);
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// (vị trí chip còn đổi theo lúc antd đo lại) -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
 // Gõ tên vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị.

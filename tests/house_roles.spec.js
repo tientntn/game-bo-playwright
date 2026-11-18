@@ -30,6 +30,7 @@
 //  - Không hard-code dữ liệu: house / role / quyền đều lấy từ response list và dropdown.
 //  - Chưa kiểm chứng được bằng UI thật: test tạo role QA lần đầu (role QA đã tồn tại nên bị skip); toast của luồng tạo thành công (dùng response giả).
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -41,7 +42,6 @@ test.use({
 });
 
 const URL = "/house/roles";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị
 const COLUMNS = ["ID", "Name", "Code", "House", "Action"];
@@ -91,11 +91,6 @@ const isPermissionList = endsWith("/permission/list");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 const houseOf = (x) => x.entityParent?.House ?? {};
 const asc = (a, b) => a - b;
 
@@ -111,7 +106,6 @@ const actionIcon = (row, i) => row.locator(".column-actions svg").nth(i);
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -119,7 +113,6 @@ const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-sele
 const toasts = (page) => page.locator(".Toastify__toast");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const tooltip = (page, text) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)").filter({ hasText: exact(text) });
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
@@ -143,20 +136,6 @@ const permBox = (page, id) => page.locator(`input[type=checkbox][value="${id}"]`
 // Danh sách phẳng { key, action, id } từ response permission/list (hoặc role/view.permissions)
 const flatPerms = (data) =>
   Object.entries(data).flatMap(([key, acts]) => Object.entries(acts).map(([action, v]) => ({ key, action, id: v.id, value: v.value })));
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-// Chỉ tính spinner của bảng: các ô filter Name / Code (tìm phía server) cũng có thể hiện spinner khi đang nạp option
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -227,12 +206,6 @@ async function columnValues(page, name) {
   return rows(page).evaluateAll((trs, i) => trs.map((tr) => tr.children[i].innerText.replace(/\s+/g, " ").trim()), idx);
 }
 
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn -> xoá mất giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
-
 // Chọn option (theo text) của filter dạng dropdown chọn nhiều rồi đóng dropdown.
 // Gõ text vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị (danh sách ảo / tìm phía server).
 async function selectOption(page, id, text) {
@@ -249,16 +222,6 @@ const selectedTitles = (page, id) =>
   filterEl(page, id)
     .locator(".ant-select-selection-item[title]")
     .evaluateAll((els) => els.map((e) => e.getAttribute("title")));
-
-// Tổng số giá trị đang chọn của 1 filter chọn nhiều: ô chỉ hiện 1 chip + chip "+ N ..." (không có title) nên cộng cả hai.
-async function selectedCount(page, id) {
-  const shown = await filterEl(page, id)
-    .locator('.ant-select-selection-overflow-item:not([aria-hidden="true"]) .ant-select-selection-item[title]')
-    .count();
-  const rest = await filterEl(page, id).locator(".ant-select-selection-overflow-item-rest").allInnerTexts();
-  const hidden = rest.reduce((sum, t) => sum + Number(t.match(/\+\s*(\d+)/)?.[1] ?? 0), 0);
-  return shown + hidden;
-}
 
 // Chọn 1 House ở filter, trả về các request dropdown Name / Code được gửi lại theo House
 async function selectHouseFilter(page, label) {

@@ -25,6 +25,7 @@
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính dòng đầu tiên của danh sách.
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, openDropdown, waitTableIdle } = require("./helpers/ui");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
@@ -56,7 +57,6 @@ const rows = (page) => page.locator("tbody tr.ant-table-row");
 const rowAt = (page, i) => rows(page).nth(i);
 
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: "plus Add New" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -64,7 +64,6 @@ const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const bulkBtns = (page) => page.locator("button.NextGen-button-more-action__update");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 // Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
 // Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.
@@ -76,15 +75,6 @@ const hoverTip = async (page, target, text) => {
     await expect(tooltip(page).filter({ hasText: text })).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 15000 });
 };
-
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -150,12 +140,6 @@ const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
 const exact = (name, flags = "") =>
   new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`, flags);
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown có chip đã chọn, vị trí đó có thể rơi vào nút (x) -> xoá giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown
 async function selectOption(page, id, title, matcher = exact(title, "i")) {

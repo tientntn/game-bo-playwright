@@ -31,6 +31,7 @@
 // Không hard-code dữ liệu - mọi giá trị lấy từ chính danh sách / response dropdown.
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, openDropdown, waitTableIdle, settle } = require("./helpers/ui");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 const { buildStorageState } = require("./helpers/session");
 
@@ -71,14 +72,12 @@ const selectAllBox = (page) => page.getByRole("checkbox", { name: "Select all" }
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: "plus Add New" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
@@ -92,15 +91,6 @@ const hoverTip = async (page, target, text) => {
     await expect(tooltip(page).filter({ hasText: text })).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 15000 });
 };
-
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -121,16 +111,6 @@ async function openPage(page) {
   await firstLoad;
   await waitTableIdle(page);
   await expect(page.locator(".NextGen-filter-bar")).toBeVisible();
-}
-
-// Chờ bảng ổn định sau khi gọi API.
-// LƯU Ý (UI, khám phá bằng MCP): khi filter vừa thay đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms.
-// Request thứ 2 có thể bị nhầm là request của thao tác kế tiếp (sort / đổi trang / search) -> chờ mạng yên (networkidle)
-// sau mỗi lần gọi để loại request thừa này.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
 }
 
 // Bấm Search, trả về { body: request body, status, json: response body }.
@@ -180,13 +160,6 @@ async function tableRecords(page) {
     trs.map((tr) => [...tr.children].map((c) => c.innerText.replace(/\s+/g, " ").trim())),
   );
   return cells.map((r) => Object.fromEntries(heads.map((h, i) => [h, r[i]])));
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.

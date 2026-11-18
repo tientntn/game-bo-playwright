@@ -29,6 +29,7 @@
 //    Các test này tạo bản ghi tạm ở Download History (xoá lại ngay) và gọi Export thật (tạo file CSV trên S3 của dev).
 //  - Không hard-code dữ liệu: id / file / module lấy từ response list.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -40,7 +41,6 @@ test.use({
 
 const URL = "/download-history";
 const CURRENCY_URL = "/admin/currency";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị (cột đầu là checkbox có header rỗng)
 const COLUMNS = ["", "ID", "Module", "Section", "File Name", "Size", "Start Time", "End Time", "Timezone", "Created By", "Created Time", "Status", "Action"];
@@ -135,11 +135,6 @@ const isCurrencyList = endsWith("/currency/list");
 const exact = (s) => new RegExp(`^\\s*${String(s).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 // "10-11-2026 00:00:00" -> "2026-11-10 00:00:00"
 const toIso = (s) => s.replace(/^(\d{2})-(\d{2})-(\d{4})/, "$3-$2-$1");
 // "2026-11-10 ..." -> Date (UTC, chỉ lấy phần ngày)
@@ -176,13 +171,11 @@ const bulkDeleteBtn = (page) => page.locator("button.NextGen-button-more-action_
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#startTime_dateRange");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
@@ -193,18 +186,6 @@ const dialog = (page) => page.locator(".ant-modal-content");
 // Tên accessible của nút có thể kèm icon ("close Cancel") -> khớp phần cuối
 const dlgConfirm = (page) => dialog(page).getByRole("button", { name: /Delete$/ });
 const dlgCancel = (page) => dialog(page).getByRole("button", { name: /Cancel$/ });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -285,11 +266,6 @@ const tableMatrix = (page) =>
       hasExpire: !!tr.children[11].querySelector(".tooltip-expire"),
     })),
   );
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL của ô (không click giữa ô)
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo text) của filter dạng dropdown chọn 1, rồi click ra ngoài để chắc chắn dropdown đóng
 async function selectOption(page, id, text) {

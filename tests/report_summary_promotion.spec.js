@@ -13,6 +13,7 @@
 // Không hard-code dữ liệu (promo, game, currency...) - mọi giá trị đều lấy từ chính bảng
 // nên test không phụ thuộc vào data trên môi trường dev.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown } = require("./helpers/ui");
 
 const URL = "/report/summary-promotion";
 const PROMO_URL = (promoId, type, playerOption) =>
@@ -80,7 +81,6 @@ const rows = (page) => mainTable(page).locator("tbody tr.ant-table-row");
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
@@ -88,9 +88,6 @@ const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const modal = (page) => page.locator(".ant-modal-content");
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page, id) => page.locator(`#${id}_dateRange`);
 
 // Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
@@ -186,13 +183,6 @@ function parseDay(s) {
   return new Date(Date.UTC(y, m - 1, d));
 }
 const diffDays = (a, b) => Math.round((a - b) / 86400000);
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
 // Gõ tên vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị.

@@ -12,6 +12,7 @@
 // rời trang (Cancel) và kiểm tra không có request ghi dữ liệu nào được gửi đi.
 // Test chạy với màn hình RỘNG (1920x1080).
 const { test, expect } = require("@playwright/test");
+const { dialog } = require("./helpers/ui");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
 
@@ -28,7 +29,6 @@ const isList = (r) => isPost(r, "/game/list/v2");
 const isView = (r) => isPost(r, "/game/view");
 
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 // Tooltip antd mở / đóng có độ trễ: tooltip cũ còn đang mờ dần thì có 2 tooltip cùng lúc (strict mode violation).
 // Đưa chuột ra ngoài, đợi tooltip cũ ẩn hết rồi hover lại, thử lại tới khi tooltip có đúng nội dung.

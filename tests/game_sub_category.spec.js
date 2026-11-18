@@ -25,6 +25,7 @@
 // list / view / validate_name) nên bản ghi "QA Sub ..." sẽ còn lại trên dev sau mỗi lần chạy full (tên dễ nhận biết để xoá tay / DB).
 const fs = require("fs");
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, openDropdown, waitTableIdle } = require("./helpers/ui");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 test.use({ viewport: { width: 1920, height: 1080 } });
@@ -73,26 +74,15 @@ const editIcon = (page, i) => rowAt(page, i).locator('svg[data-icon="pen-to-squa
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: "plus Add New" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
-const dialog = (page) => page.getByRole("dialog");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -161,13 +151,6 @@ const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
 const exact = (name, flags = "") =>
   new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`, flags);
 const totalOf = async (page) => num((await summary(page).innerText()).match(/of ([\d,]+) records/)[1]);
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
 // Gõ tên vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị (danh sách ảo).

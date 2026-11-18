@@ -23,6 +23,7 @@
 //  - Không hard-code dữ liệu (game, id, nội dung): mọi giá trị lấy từ response list / dropdown/game / dropdown/language / translation/view.
 //  - Chưa kiểm chứng được bằng UI thật: toast / hành vi sau khi Save thành công và lỗi từ server (vì không được ghi dữ liệu thật).
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 
 test.use({
@@ -32,7 +33,6 @@ test.use({
 });
 
 const URL = "/game-recommendation/recommendation-content";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị (không có cột checkbox)
 const COLUMNS = ["Game Name", "Recommendation Game Title", "Recommendation Description", "Translated Content", "Actions"];
@@ -68,11 +68,6 @@ const isLanguageDropdown = (r) => reqOf(r).url().endsWith("/dropdown/language");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 
 // Bảng chính (luôn là .ant-table đầu tiên trong DOM; bảng trong hộp thoại được append sau)
 const table = (page) => page.locator(".ant-table").first();
@@ -87,7 +82,6 @@ const viewBtn = (row) => row.getByRole("button", { name: "View Content" });
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
@@ -96,7 +90,6 @@ const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-sele
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 
 // Ô nhập sửa trực tiếp trên dòng
 const titleInput = (row) => row.locator("#recommendationGameTitle");
@@ -113,19 +106,6 @@ const dialogCodeSelect = (page) => dialog(page).locator(".ant-select").first();
 
 // Text option của game / ngôn ngữ: "code - tên"
 const optionText = (g) => `${g.code} - ${g.label}`;
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms (khám phá bằng script):
-// chờ mạng yên sau mỗi lần gọi để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -175,11 +155,6 @@ async function columnValues(page, name) {
   await expect.poll(() => headers(page), { message: `Không thấy cột "${name}"` }).toContain(name);
   const idx = (await headers(page)).indexOf(name);
   return rows(page).evaluateAll((trs, i) => trs.map((tr) => tr.children[i].innerText.replace(/\s+/g, " ").trim()), idx);
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn game ở filter Game Name (dropdown chọn 1 giá trị, tự đóng sau khi chọn).

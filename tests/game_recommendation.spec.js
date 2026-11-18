@@ -23,6 +23,7 @@
 //  - Không hard-code dữ liệu: game, group, priority game đều lấy từ response dropdown / danh sách.
 // Dữ liệu dev ít (~12 bản ghi) nên test phân trang dùng 10 dòng/trang; test nào cần dữ liệu mà không đủ sẽ tự skip.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, waitTableIdle, settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -67,11 +68,6 @@ const isGroupDropdown = (r) => reqOf(r).url().endsWith("/dropdown/recommendation
 
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 const sortedAsc = (a) => [...a].sort();
 
 const table = (page) => page.locator(".ant-table").first();
@@ -85,14 +81,12 @@ const deleteIcon = (row) => row.locator('svg[data-icon="trash"]');
 const th = (page, name) => table(page).locator("thead th").filter({ hasText: exact(name) });
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const toast = (page, text) => page.locator(".Toastify__toast").filter({ hasText: text });
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
 
 // Hộp thoại Add / Edit / Delete
@@ -105,19 +99,6 @@ const modalTitle = (page) => modal(page).locator(".ant-modal-title");
 
 // Text option của game: "CODE - Tên"
 const optionText = (g) => `${g.code} - ${g.label ?? g.name}`;
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list giống hệt nhau cách nhau ~200ms:
-// chờ mạng yên sau mỗi lần gọi để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình, chờ lần load đầu; trả về { body, json } của request mặc định
 async function openPage(page) {

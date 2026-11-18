@@ -29,6 +29,7 @@
 //  - Export tạo bản ghi ở Download History; nếu file cùng filter đã tồn tại thì hộp thoại "Download Now / Download New" hiện ra và test KHÔNG bấm Download New.
 //  - Không hard-code dữ liệu: currency dùng cho test đều lấy từ response list.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -40,7 +41,6 @@ test.use({
 });
 
 const URL = "/admin/currency";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị (cột đầu tiên là checkbox chọn dòng, không có tên)
 const COLUMNS = ["ID", "Code", "Name", "Max Payout", "Sweepstake", "Exchange Rate(to USD)", "Status", "Action"];
@@ -101,11 +101,6 @@ const isDownload = endsWith("/download");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 const asc = (a, b) => a - b;
 const near = (cell, value) => Math.abs(num(cell) - Number(value)) <= Math.max(1e-6, Math.abs(Number(value)) * 1e-9);
 const qaCode = () => QA_CODE_PREFIX + [...String(Date.now()).slice(-6)].map((d) => "ABCDEFGHIJ"[d]).join("");
@@ -123,7 +118,6 @@ const ICON = { history: 0, update: 1, toggle: 2 };
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -132,12 +126,10 @@ const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const bulkBtns = (page) => page.locator("button.NextGen-button-more-action__update");
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
-const dialog = (page) => page.getByRole("dialog");
 const toasts = (page) => page.locator(".Toastify__toast");
 const tooltip = (page) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 
 // Hộp thoại Add / Update (các ô nằm TRONG hộp thoại: id name / code trùng với filter ở trang nên luôn phải đi qua dialog)
 const field = (page, id) => dialog(page).locator(`#${id}`);
@@ -158,19 +150,6 @@ const hoverTip = async (page, target, text) => {
     await expect(tooltip(page).filter({ hasText: exact(text) })).toBeVisible({ timeout: 2000 });
   }).toPass({ timeout: 15000 });
 };
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -250,11 +229,6 @@ const tableMatrix = (page) =>
       statusClass: tr.children[7]?.querySelector(".ant-tag")?.className ?? "",
     })),
   );
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo text) của filter dạng dropdown (Sweep Stake / Status: chọn 1) rồi đóng dropdown.
 async function selectOption(page, id, text) {

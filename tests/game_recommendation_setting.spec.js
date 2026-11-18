@@ -33,6 +33,7 @@
 //  - Không hard-code dữ liệu: master agent / agent / dòng đều lấy từ response list và dropdown.
 //  - Chưa kiểm chứng được bằng UI thật: nội dung toast khi server lỗi lúc bật / tắt công tắc (chỉ kiểm tra toast "Error" bằng response giả).
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle } = require("./helpers/ui");
 const { randomUUID } = require("crypto");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 const { buildStorageState } = require("./helpers/session");
@@ -45,7 +46,6 @@ test.use({
 });
 
 const URL = "/game-recommendation/setting";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị (không có cột checkbox / Action)
 const COLUMNS = ["Master Agent", "Agent", "Recommended Games", "Event Announcement"];
@@ -88,11 +88,6 @@ const isAgentDropdown = endsWith("/report/agent_dropdown");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 
 // Bảng chính (luôn là .ant-table đầu tiên trong DOM)
 const table = (page) => page.locator(".ant-table").first();
@@ -107,7 +102,6 @@ const switchOf = (row, col) => row.locator("td").nth(col).getByRole("switch");
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -117,7 +111,6 @@ const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-sele
 const toasts = (page) => page.locator(".Toastify__toast");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 
 // Hộp thoại "Add Agent". Lưu ý: id #masterAgentId / #agentId của hộp thoại TRÙNG với id của 2 filter phía sau
 // (label for=... sẽ focus nhầm filter) -> thao tác bằng .ant-select trong hộp thoại, KHÔNG click label.
@@ -130,19 +123,6 @@ const cancelBtn = (page) => dialog(page).getByRole("button", { name: /Cancel$/ }
 
 // Text option của master agent / agent: "code - tên"
 const optionText = (x) => `${x.code} - ${x.label}`;
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -211,11 +191,6 @@ async function columnValues(page, name) {
   await expect.poll(() => headers(page), { message: `Không thấy cột "${name}"` }).toContain(name);
   const idx = (await headers(page)).indexOf(name);
   return rows(page).evaluateAll((trs, i) => trs.map((tr) => tr.children[i].innerText.replace(/\s+/g, " ").trim()), idx);
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn 1 giá trị ở filter (dropdown chọn 1, tự đóng sau khi chọn). Gõ code vào ô tìm kiếm để option chắc chắn có trong danh sách.

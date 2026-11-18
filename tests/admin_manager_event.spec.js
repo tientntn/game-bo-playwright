@@ -24,6 +24,7 @@
 // action-ack/list (request đọc, không ảnh hưởng dữ liệu). Dữ liệu event là dữ liệu CHUNG, luôn được người khác ghi thêm khi test chạy nên test không so sánh tổng số
 // giữa 2 lần gọi API và không hard-code trace id / người dùng / topic: mọi giá trị đều lấy từ chính response.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -34,7 +35,6 @@ test.use({
 });
 
 const URL = "/admin/manager-event";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Bảng cha: cột đầu là ô expand (header rỗng). Đúng thứ tự hiển thị
 const COLUMNS = ["Trace ID", "Username", "Topic", "Action Type", "Application", "Status", "Rollback Status", "Updated At", "Action"];
@@ -81,11 +81,6 @@ const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
 // Chữ cái đầu viết hoa, phần còn lại giữ nguyên ("fail" -> "Fail", "NA" -> "NA")
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 // "23-10-2026 17:43:34" -> "2026-10-23 17:43:34" (so sánh chuỗi được theo thứ tự thời gian)
 const toIso = (s) => s.replace(/^(\d{2})-(\d{2})-(\d{4})/, "$3-$2-$1");
 // "09-11-2026 17:00:00" -> số phút từ epoch (coi như UTC) để tính chênh lệch giữa 2 múi giờ
@@ -118,30 +113,15 @@ const eyeIcon = (childRow) => childRow.locator("svg[data-icon=eye]");
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const modal = (page) => page.locator(".ant-modal-content");
 const toasts = (page) => page.locator(".Toastify__toast");
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Danh sách timezone của lần mở trang gần nhất (response timezone/list) - dùng để đối chiếu option của dropdown
 let tzList = [];
@@ -250,11 +230,6 @@ async function expandAll(page) {
     if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
   }
   await expect(page.locator(".ant-table-row-expand-icon-expanded")).toHaveCount(n);
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Đọc toàn bộ option đang có của 1 dropdown

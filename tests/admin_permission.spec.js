@@ -29,6 +29,7 @@
 //      * afterEach kiểm tra mọi request ghi chỉ nhắm vào quyền QA này (permission/update có id = id quyền QA; permission/create chỉ với name QA_UI_PERM_...).
 //  - Không hard-code dữ liệu: quyền dùng cho test đều lấy từ response list.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -40,7 +41,6 @@ test.use({
 });
 
 const URL = "/admin/permission";
-const ORIGIN = "https://dev-bo.royaledge.io";
 
 // Đúng thứ tự hiển thị
 const COLUMNS = ["ID", "Name", "URL", "Type", "Public", "Category", "Roles", "Action"];
@@ -95,11 +95,6 @@ const isUpdate = endsWith("/permission/update");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 const asc = (a, b) => a - b;
 const typeLabel = (t) => t.charAt(0) + t.slice(1).toLowerCase(); // "CREATE" -> "Create" (nhãn trong form)
 const rolesOf = (x) => (x.hierarchyMap ?? []).map((h) => HIERARCHY[h]); // tag Roles mong đợi của 1 quyền
@@ -116,7 +111,6 @@ const actionIcon = (row) => row.locator(".column-actions svg").first();
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const addBtn = (page) => page.getByRole("button", { name: /Add New/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -124,7 +118,6 @@ const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-sele
 const toasts = (page) => page.locator(".Toastify__toast");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const tooltip = (page, text) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)").filter({ hasText: exact(text) });
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
@@ -141,19 +134,6 @@ const roleBox = (page, h) => page.locator("label.ant-checkbox-wrapper").filter({
 const roleChecked = (page) => page.locator("input[type=checkbox]:checked");
 const formErrors = (page) => page.locator(".ant-form-item-explain-error");
 const rolesItem = (page) => page.locator(".ant-form-item").filter({ has: page.locator("input[type=checkbox]") });
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -234,12 +214,6 @@ const tableMatrix = (page) =>
       publicClass: tr.children[4]?.querySelector(".ant-tag")?.className ?? "",
     })),
   );
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn -> xoá mất giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo text) của filter dạng dropdown (Type: chọn nhiều, Public: chọn 1) rồi đóng dropdown.
 async function selectOption(page, id, text) {
