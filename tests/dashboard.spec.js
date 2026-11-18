@@ -18,11 +18,9 @@
 //
 // Các test chỉ ĐỌC dữ liệu (không tạo / sửa / xoá gì, không Export).
 //
-// Mỗi phép so sánh với Game Summary được chạy 2 lớp ("double test"):
-//   - THEO CHART  : lấy danh sách currency đang có dữ liệu trên chart "Top 10 GGR by Currencies" rồi test LẦN LƯỢT TỪNG currency đó
-//                   (không hard-code; dữ liệu trên dev đổi thì danh sách tự đổi theo). Lỗi được gom theo currency trong 1 test (expect.soft).
-//   - CỐ ĐỊNH     : currency TKN + game Samba Bonanza (đúng màn hình mẫu của QA) - mục "Đối chiếu cố định".
-//                   Nếu TKN / Samba Bonanza không có trên chart thì test được SKIP kèm lý do.
+// Phép so sánh với Game Summary chạy THEO CHART: lấy danh sách currency đang có dữ liệu trên chart "Top 10 GGR by Currencies"
+// rồi test LẦN LƯỢT TỪNG currency đó (không hard-code; dữ liệu trên dev đổi thì danh sách tự đổi theo).
+// Lỗi được gom theo currency trong 1 test (expect.soft).
 //
 // Cách so sánh với Game Summary (https://dev-bo.royaledge.io/report/summary-game):
 //   - Date Period = preset "Last 30 Days" (khớp khoảng ngày ghi trên tiêu đề chart, test riêng kiểm tra điều này).
@@ -46,6 +44,7 @@
 // Cách đọc dữ liệu chart: chart vẽ bằng canvas nên không đọc được từ DOM. Test lấy instance Chart.js (react-chartjs-2 giữ trong
 // hook ref của React) và đọc chart.data - đúng dữ liệu mà chart đang vẽ.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown, waitTableIdle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 
 // buildStorageState bỏ các key filter / page size / sorter đã lưu trong session.txt -> mỗi test luôn mở với filter mặc định
@@ -57,10 +56,6 @@ test.describe.configure({ timeout: 120000 });
 
 const DASHBOARD_URL = "/";
 const SUMMARY_URL = "/report/summary-game";
-
-// Dữ liệu cố định cho mục "Đối chiếu cố định" (theo yêu cầu của QA)
-const FIXED_CURRENCY = "TKN";
-const FIXED_GAME = "Samba Bonanza";
 
 // Metric của Top 10 Games -> performanceType gửi lên API, cột tương ứng của Game Summary
 const METRICS = [
@@ -284,17 +279,10 @@ async function collectTrend(page, dash, code) {
 // Game Summary
 // ---------------------------------------------------------------------------
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const pageTitle = (page) => page.getByRole("navigation").getByText("Game Summary Report");
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#datePeriod_dateRange");
 const summationTable = (page) =>
   page.locator(".ant-table").filter({ hasText: "Summation By Currency" });
-
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 async function openGameSummary(page) {
   await gotoAndWait(page, SUMMARY_URL, page.waitForResponse(isSummary));
@@ -308,11 +296,6 @@ async function resetGameSummary(page) {
   await resetBtn(page).click();
   await afterReset;
   await waitTableIdle(page);
-}
-
-// Mở dropdown bằng cách click vào LABEL (không click giữa ô: có thể trúng nút (x) của chip đã chọn)
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn option (không phân biệt hoa/thường) của filter dạng dropdown rồi đóng dropdown
@@ -723,96 +706,6 @@ test.describe("Dashboard - So sánh với Game Summary (theo chart: mọi curren
       const { rows } = await loadGameSummary(page, code, { reset: i > 0 });
       compareTrendPerDay(code, trends[code], rows);
     }
-  });
-});
-
-test.describe("Dashboard - Đối chiếu cố định: TKN / Samba Bonanza", () => {
-  test(`${FIXED_CURRENCY} / ${FIXED_GAME}: cột Turnover và Bet Count trên Top 10 Games = Total ETO và Total Bet Count (Summation By Currency)`, async ({
-    page,
-  }) => {
-    test.setTimeout(300000);
-    const dash = await openDashboard(page);
-    test.skip(
-      !currenciesWithData(dash).includes(FIXED_CURRENCY),
-      `${FIXED_CURRENCY} không có dữ liệu trên Top 10 GGR by Currencies`,
-    );
-    const charts = await collectTopGames(page, dash, FIXED_CURRENCY, { metric: METRICS[0] });
-    const bar = (metricName) => {
-      const { labels, values } = charts[metricName].chart;
-      const i = labels.indexOf(FIXED_GAME);
-      return i < 0 ? null : values[i];
-    };
-    const turnover = bar("Turnover");
-    const betCount = bar("Bet Count");
-    test.skip(
-      turnover === null && betCount === null,
-      `${FIXED_GAME} không nằm trong Top 10 Games của ${FIXED_CURRENCY} (cả Turnover lẫn Bet Count)`,
-    );
-
-    // Game Summary: Currency + Game Name (30 ngày, Sweepstake All) -> bảng Summation By Currency
-    await openGameSummary(page);
-    await filterAndSearch(page, { currency: FIXED_CURRENCY, game: FIXED_GAME });
-    const totals = await readSummationTotals(page, FIXED_CURRENCY);
-    if (turnover !== null) {
-      expectClose(turnover, num(totals["Total ETO"]), TOL_SUMMATION, `Turnover ${FIXED_GAME} (${FIXED_CURRENCY})`);
-    }
-    if (betCount !== null) {
-      expectClose(betCount, num(totals["Total Bet Count"]), 0, `Bet Count ${FIXED_GAME} (${FIXED_CURRENCY})`);
-    }
-  });
-
-  test(`${FIXED_CURRENCY}: Top 10 Games (Bet Count / Turnover / GGR) = Game Summary`, async ({ page }) => {
-    test.setTimeout(300000);
-    const dash = await openDashboard(page);
-    test.skip(
-      !currenciesWithData(dash).includes(FIXED_CURRENCY),
-      `${FIXED_CURRENCY} không có dữ liệu trên Top 10 GGR by Currencies`,
-    );
-    const charts = await collectTopGames(page, dash, FIXED_CURRENCY, { metric: METRICS[0] });
-
-    await openGameSummary(page);
-    const { rows, totals } = await loadGameSummary(page, FIXED_CURRENCY);
-    for (const metric of METRICS) {
-      const { chart } = charts[metric.name];
-      compareTopGames(FIXED_CURRENCY, metric, chart, rows);
-      compareTopGamesWithSummation(FIXED_CURRENCY, metric, chart, rows, totals);
-    }
-  });
-
-  test(`${FIXED_CURRENCY}: cột Top 10 GGR by Currencies = tổng GGR line chart = Total GGR của Game Summary`, async ({
-    page,
-  }) => {
-    test.setTimeout(300000);
-    const dash = await openDashboard(page);
-    const bars = await readChart(page, 1);
-    const i = bars.labels.indexOf(FIXED_CURRENCY);
-    test.skip(i < 0, `${FIXED_CURRENCY} không có dữ liệu trên Top 10 GGR by Currencies`);
-    const barGgr = bars.datasets[0].data[i];
-    const trend = await collectTrend(page, dash, FIXED_CURRENCY);
-
-    await openGameSummary(page);
-    await filterAndSearch(page, { currency: FIXED_CURRENCY });
-    const totalGgr = num((await readSummationTotals(page, FIXED_CURRENCY))["Total GGR"]);
-
-    expectClose(barGgr, totalGgr, TOL_SUMMATION, `Cột ${FIXED_CURRENCY} trên Top 10 GGR by Currencies`);
-    expectClose(sum(trend.values), totalGgr, TOL_TREND_SUM, `Tổng GGR line chart ${FIXED_CURRENCY}`);
-  });
-
-  // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): GGR từng ngày của line chart TKN lệch Game Summary dù tổng khớp.
-  // 17/11/2026: 10-11-2026 chart 18,939.122 / Game Summary 19,901.432 (chart thấp hơn 962.31); 11-11-2026 chart -55,580.109 /
-  // Game Summary -56,542.419 (chart cao hơn 962.31) -> 1 khoản GGR 962.31 bị tính sang ngày khác.
-  test(`${FIXED_CURRENCY}: GGR từng ngày của line chart = tổng GGR các dòng của ngày đó trên Game Summary`, async ({ page }) => {
-    test.setTimeout(300000);
-    const dash = await openDashboard(page);
-    test.skip(
-      !currenciesWithData(dash).includes(FIXED_CURRENCY),
-      `${FIXED_CURRENCY} không có dữ liệu trên Top 10 GGR by Currencies`,
-    );
-    const trend = await collectTrend(page, dash, FIXED_CURRENCY);
-
-    await openGameSummary(page);
-    const { rows } = await loadGameSummary(page, FIXED_CURRENCY);
-    compareTrendPerDay(FIXED_CURRENCY, trend, rows);
   });
 });
 

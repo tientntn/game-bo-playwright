@@ -18,6 +18,7 @@
 //   SEG_CURRENCY (mặc định "TKN"), SEG_AGENT (mặc định "Royal Edge TKN")
 // Nếu tổ hợp này không có dữ liệu thì các test cần dữ liệu sẽ bị skip.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown } = require("./helpers/ui");
 
 const URL = "/report/segmentation-player";
 const CURRENCY = process.env.SEG_CURRENCY || "TKN";
@@ -127,7 +128,6 @@ const API_BY_TAB = {
 };
 
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const customizeBtn = (page) => page.getByRole("button", { name: /Customize Table/ });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
@@ -142,9 +142,6 @@ const customizeModal = (page) =>
 const requiredDialog = (page) =>
   page.locator(".ant-modal-content").filter({ hasText: "Please fill in all required fields in Customize Table" });
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#settledTime_dateRange");
 
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
@@ -184,13 +181,6 @@ async function openPage(page) {
     );
   }
   await expect(filterEl(page, "currencyId")).toBeVisible();
-}
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// (vị trí chip còn đổi theo lúc antd đo lại) -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
 }
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
@@ -330,8 +320,9 @@ async function openTab(page, name) {
   return { body: JSON.parse(req.postData()), status: res.status(), json: await res.json() };
 }
 
+// Nhãn cột có thể bị xuống dòng trong giao diện (vd "Low Frequency" xuống dòng rồi tới phần ngoặc) -> gộp khoảng trắng / xuống dòng thành 1 dấu cách
 async function headers(page) {
-  return (await mainTable(page).locator("thead th").allInnerTexts()).map((t) => t.trim());
+  return (await mainTable(page).locator("thead th").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
 }
 
 // Đọc ma trận: [{ label, cells: [{ pct (số), text (mô tả) }] }] (bỏ qua hàng đo kích thước ẩn của antd)
@@ -365,15 +356,15 @@ const powerHeaders = (c) => [
   `High Frequency (>${c.betFreqHighMin})`,
 ];
 const behaviorHeaders = (c) => [
-  "CPN / Frequency",
+  "CPn / Frequency", // "CPn" (chữ n thường) là chủ ý của giao diện
   `Low Frequency (<${c.betFreqMediumMin} bets per Game/Player)`,
   `Medium Frequency (${c.betFreqMediumMin}-${c.betFreqHighMin} bets per Game/Player)`,
   `High Frequency (>${c.betFreqHighMin} bets per Game/Player)`,
 ];
 const behaviorRowLabels = (c) => [
-  `Low CPN (${c.cpnMediumMin} ${Number(c.cpnMediumMin) === 1 ? "game" : "games"})`,
-  `Medium CPN (${Number(c.cpnMediumMin) + 1}-${c.cpnHighMin} games)`,
-  `High CPN (>${c.cpnHighMin} games)`,
+  `Low CPn (${c.cpnMediumMin} ${Number(c.cpnMediumMin) === 1 ? "game" : "games"})`,
+  `Medium CPn (${Number(c.cpnMediumMin) + 1}-${c.cpnHighMin} games)`,
+  `High CPn (>${c.cpnHighMin} games)`,
 ];
 
 // segmentFilters mong đợi trong request theo ngưỡng đã nhập

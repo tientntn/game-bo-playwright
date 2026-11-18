@@ -19,6 +19,7 @@
 // Dữ liệu audit log là dữ liệu CHUNG, luôn được người khác ghi thêm trong lúc test chạy (tổng số bản ghi thay đổi liên tục) nên test không so sánh tổng số
 // giữa 2 lần gọi API, và không hard-code người dùng / module / applied to: mọi giá trị đều lấy từ chính dòng đầu của danh sách.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, bodyOf, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -93,11 +94,6 @@ const isView = endsWith("/log/view");
 const exact = (s) => new RegExp(`^\\s*${s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`);
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 const num = (s) => parseFloat(String(s).replace(/[,%+]/g, ""));
-// Body gửi API luôn kèm traceId ngẫu nhiên -> bỏ đi trước khi so sánh
-const bodyOf = (req) => {
-  const { traceId, ...rest } = JSON.parse(req.postData());
-  return rest;
-};
 // "23-10-2026 17:43:34" -> "2026-10-23 17:43:34" (so sánh chuỗi được theo thứ tự thời gian)
 const toIso = (s) => s.replace(/^(\d{2})-(\d{2})-(\d{4})/, "$3-$2-$1");
 // "09-11-2026 17:00:00" -> số phút từ epoch (coi như UTC) để tính chênh lệch giữa 2 múi giờ
@@ -127,30 +123,15 @@ const detailsBtn = (row) => row.getByRole("button", { name: "Details" });
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const pageSizeSelect = (page) => page.locator(".ant-pagination-options .ant-select");
 const openOptions = (page) =>
   page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
-const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#time_dateRange");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const modal = (page) => page.locator(".ant-modal-content");
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-table-wrapper .ant-spin-spinning")).toHaveCount(0);
-}
-
-// Khi filter vừa đổi, Search đôi khi gửi 2 request list GIỐNG HỆT nhau cách nhau ~200ms: chờ mạng yên sau mỗi lần gọi
-// để request thừa không bị nhầm là request của thao tác kế tiếp.
-async function settle(page) {
-  await waitTableIdle(page);
-  await page.waitForLoadState("networkidle").catch(() => {});
-  await waitTableIdle(page);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -236,12 +217,6 @@ const tableMatrix = (page) =>
     })),
   );
 
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn -> xoá mất giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
-
 // Chọn option (theo text) của filter dạng dropdown rồi đóng dropdown.
 // Gõ tên vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị (danh sách ảo).
 async function selectOption(page, id, text) {
@@ -268,16 +243,6 @@ const selectedTitles = (page, id) =>
   filterEl(page, id)
     .locator(".ant-select-selection-item[title]")
     .evaluateAll((els) => els.map((e) => e.getAttribute("title")));
-
-// Tổng số giá trị đang chọn của 1 filter chọn nhiều (ô chỉ hiện 1 chip + chip "+ N ..." không có title)
-async function selectedCount(page, id) {
-  const shown = await filterEl(page, id)
-    .locator('.ant-select-selection-overflow-item:not([aria-hidden="true"]) .ant-select-selection-item[title]')
-    .count();
-  const rest = await filterEl(page, id).locator(".ant-select-selection-overflow-item-rest").allInnerTexts();
-  const hidden = rest.reduce((sum, t) => sum + Number(t.match(/\+\s*(\d+)/)?.[1] ?? 0), 0);
-  return shown + hidden;
-}
 
 // Gõ vào filter dạng input (User Name / Applied To): input bị ẩn cho tới khi click label
 async function typeFilter(page, id, value) {
@@ -315,6 +280,17 @@ async function pickTimezone(page, zone) {
 // Có dữ liệu thì mới test tiếp (dev dùng chung nên gần như luôn có)
 async function ensureData(page) {
   test.skip((await rows(page).count()) === 0, "Audit log không có bản ghi nào để test");
+}
+
+// Đặt 200 dòng / trang rồi trả về { list (response API), matrix (các ô trên bảng) } của trang 1
+async function loadFirst200(page) {
+  await ensureData(page);
+  await pageSizeSelect(page).click();
+  const { json } = await reloadFull(page, () => openOptions(page).filter({ hasText: "200 / page" }).click());
+  const list = json.data.list;
+  const matrix = await tableMatrix(page);
+  expect(matrix.length, "số dòng trên bảng phải bằng số dòng API trả về").toBe(list.length);
+  return { list, matrix };
 }
 
 // Ghi lại mọi request POST KHÔNG phải đọc dữ liệu (url + body đã bỏ traceId)
@@ -489,17 +465,50 @@ test.describe("Administration > Audit Logs", () => {
       }
     });
 
-    test("Định dạng: Time dạng dd-MM-yyyy HH:mm:ss, Action Type hợp lệ, các cột chữ không trống", async ({ page }) => {
-      await ensureData(page);
-      for (const v of await columnValues(page, "Time")) expect(v).toMatch(DATETIME);
-      for (const tags of await actionTags(page)) {
-        expect(tags.length).toBeGreaterThan(0);
-        for (const t of tags) expect(Object.keys(ACTION_TYPES)).toContain(t);
-      }
-      for (const col of ["User Name", "Module", "Entity", "Applied To", "IP Address"]) {
-        for (const v of await columnValues(page, col)) expect(v, col).not.toBe("");
-      }
-      for (const v of await columnValues(page, "Module")) expect(MODULES).toContain(v);
+    // Kiểm tra 200 dòng ĐẦU (trang 1 với 200 dòng / trang); không quét các trang sau để test chạy nhanh.
+    // Gom TẤT CẢ dòng vi phạm theo từng loại lỗi (kèm số dòng và vài id mẫu) rồi mới báo lỗi 1 lần.
+    // Module phải nằm trong danh sách option của bộ lọc Module (MODULES): dữ liệu có giá trị mà bộ lọc không có nghĩa là không thể lọc ra
+    // các dòng đó. (Action Type thiếu trong bộ lọc là lỗi đã xác nhận, được kiểm tra riêng ở test ngay bên dưới.)
+    test("Định dạng trên 200 dòng đầu: Time dạng dd-MM-yyyy HH:mm:ss, Action Type có giá trị, Module hợp lệ, các cột chữ không trống", async ({ page }) => {
+      const { list, matrix } = await loadFirst200(page);
+
+      const textColumns = [
+        ["User Name", COL.username],
+        ["Module", COL.module],
+        ["Entity", COL.entity],
+        ["Applied To", COL.appliedTo],
+        ["IP Address", COL.ip],
+      ];
+      const problems = new Map(); // mô tả lỗi -> { count, ids }
+      const addProblem = (text, id) => {
+        const p = problems.get(text) || { count: 0, ids: [] };
+        p.count++;
+        if (p.ids.length < 3) p.ids.push(id);
+        problems.set(text, p);
+      };
+      matrix.forEach((row, i) => {
+        const id = list[i].id;
+        const tags = row.tags[COL.actionType];
+        const moduleName = row.cells[COL.module];
+        if (!DATETIME.test(row.cells[COL.time])) addProblem("Time sai định dạng dd-MM-yyyy HH:mm:ss", id);
+        if (tags.length === 0) addProblem("Action Type trống", id);
+        for (const [name, idx] of textColumns) if (row.cells[idx] === "") addProblem(`${name} trống (Module ${moduleName} / Action ${tags.join(", ")})`, id);
+        if (!MODULES.includes(moduleName)) addProblem(`Module "${moduleName}" không có trong bộ lọc Module`, id);
+      });
+
+      const summary = [...problems].map(([text, p]) => `${p.count} dòng: ${text} (vd id ${p.ids.join(", ")})`);
+      const total = [...problems.values()].reduce((n, p) => n + p.count, 0);
+      expect(summary, `${total} vi phạm thuộc ${summary.length} loại lỗi trên ${matrix.length} dòng đã kiểm tra`).toEqual([]);
+    });
+
+    // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): bộ lọc Action Type thiếu các loại hành động đã có trong dữ liệu
+    // (vd "Change Password", "Reset Password") nên không lọc ra được các dòng đó. Danh sách option của bộ lọc = ACTION_TYPES
+    // (đã được test "option của bộ lọc" kiểm tra khớp màn hình). Kiểm tra trên 200 dòng đầu.
+    test("Mọi Action Type có trong 200 dòng đầu đều phải có trong bộ lọc Action Type", async ({ page }) => {
+      const { matrix } = await loadFirst200(page);
+      const inData = new Set(matrix.flatMap((row) => row.tags[COL.actionType]));
+      const missing = [...inData].filter((t) => !Object.keys(ACTION_TYPES).includes(t)).sort();
+      expect(missing, "Action Type có trong dữ liệu nhưng KHÔNG có trong bộ lọc Action Type").toEqual([]);
     });
 
     test("Mặc định sắp xếp theo id giảm dần và id không trùng nhau", async ({ page }) => {

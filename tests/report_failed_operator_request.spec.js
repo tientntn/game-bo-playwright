@@ -15,11 +15,15 @@
 // Các test cần dữ liệu sẽ chọn "Last 90 Days" + bỏ chọn Operator (xem loadData).
 // Không hard-code dữ liệu - mọi giá trị đều lấy từ chính dòng đầu tiên của báo cáo.
 const { test, expect } = require("@playwright/test");
+const { filterEl, resetBtn, openDropdown, waitTableIdle } = require("./helpers/ui");
 
 const URL = "/report/failed-operator-request";
 
-// Cột đầu tiên là checkbox (header rỗng)
-const COLUMNS = [
+// Cột BẮT BUỘC phải có, đúng thứ tự (cột đầu tiên của bảng là checkbox, header rỗng).
+// Nguồn chính của danh sách cột là popover Manage Columns: bảng, popover và Export phải khớp nhau. Màn hình thêm cột mới
+// (vd "Error Code") thì test KHÔNG fail mà chỉ ghi chú tên cột mới vào kết quả test (annotation "cột mới", xem checkRequiredColumns);
+// chỉ khi 1 cột bắt buộc bị mất / đổi tên / đổi thứ tự thì test mới fail.
+const REQUIRED_COLUMNS = [
   "Round ID",
   "Bet ID",
   "Operator",
@@ -38,7 +42,6 @@ const COLUMNS = [
   "Token",
   "Action",
 ];
-const ALL_HEADERS = ["", ...COLUMNS];
 
 // status gửi/nhận từ API: 0 = Pending, 1 = Cancelled
 const STATUS_TEXT = { 0: "Pending", 1: "Cancelled" };
@@ -63,7 +66,6 @@ const rowAt = (page, i) => rows(page).nth(i);
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
-const resetBtn = (page) => page.getByRole("button", { name: "close Reset" });
 const breadcrumb = (page) => page.locator("nav.ant-breadcrumb");
 const filterToggle = (page) => page.locator(".NextGen-list-layout__filter-control__filter-btn");
 const exportBtn = (page) => page.locator("button.NextGen-export-button");
@@ -74,15 +76,7 @@ const modal = (page) => page.locator(".ant-modal-content");
 const dialogButton = (page, name) =>
   page.locator(".ant-modal button").filter({ hasText: new RegExp(`^\\s*${name}\\s*$`) });
 
-// Phần tử bao 1 filter (theo id của input bên trong)
-const filterEl = (page, id) =>
-  page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
 const dateRangeInput = (page) => page.locator("#betTime_dateRange");
-
-// Chờ bảng render xong sau 1 lần gọi API (spinner của antd biến mất)
-async function waitTableIdle(page) {
-  await expect(page.locator(".ant-spin-spinning")).toHaveCount(0);
-}
 
 // Mở màn hình và chờ lần load đầu tiên (default filter) xong
 async function openPage(page) {
@@ -132,6 +126,22 @@ async function headers(page) {
   return (await mainTable(page).locator("thead th").allInnerTexts()).map((t) => t.trim());
 }
 
+// Danh sách cột trong popover Manage Columns (mở popover nếu chưa mở)
+async function manageColumnNames(page) {
+  if (!(await columnPopover(page).isVisible())) await columnBtn(page).click();
+  await expect(columnPopover(page)).toBeVisible();
+  const names = await columnPopover(page).locator(".NextGen-popover-manage-column__list__items .ant-typography").allInnerTexts();
+  return names.map((n) => n.trim());
+}
+
+// Các cột bắt buộc phải có đủ và đúng thứ tự; cột mới (không nằm trong REQUIRED_COLUMNS) chỉ được ghi chú, không làm test fail
+function checkRequiredColumns(names) {
+  const required = names.filter((n) => REQUIRED_COLUMNS.includes(n));
+  expect(required, "thiếu / đổi tên / sai thứ tự cột bắt buộc").toEqual(REQUIRED_COLUMNS);
+  const extra = names.filter((n) => !REQUIRED_COLUMNS.includes(n));
+  if (extra.length) test.info().annotations.push({ type: "cột mới", description: extra.join(", ") });
+}
+
 // Lấy toàn bộ giá trị của 1 cột (theo tên header) ở trang hiện tại
 async function columnValues(page, name) {
   await expect.poll(() => headers(page), { message: `Không thấy cột "${name}"` }).toContain(name);
@@ -163,13 +173,6 @@ function parseDay(s) {
   return new Date(Date.UTC(y, m - 1, d));
 }
 const diffDays = (a, b) => Math.round((a - b) / 86400000);
-
-// Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
-// KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
-// -> bấm vào sẽ XOÁ giá trị đang chọn.
-async function openDropdown(page, id) {
-  await filterEl(page, id).locator(".NextGen-filter-dropdown__control label").first().click();
-}
 
 // Chọn option (theo tên) của filter dạng dropdown rồi đóng dropdown.
 // Gõ tên vào ô tìm kiếm trước để option chắc chắn nằm trong danh sách hiển thị.
@@ -345,8 +348,11 @@ test.describe("Report > Failed Operator Request", () => {
       }
     });
 
-    test(`Bảng có đủ ${COLUMNS.length} cột (cột checkbox + các cột dữ liệu) đúng thứ tự`, async ({ page }) => {
-      expect(await headers(page)).toEqual(ALL_HEADERS);
+    test("Bảng khớp Manage Columns (cột checkbox + các cột trong popover), có đủ cột bắt buộc đúng thứ tự", async ({ page }) => {
+      const tableHeaders = await headers(page);
+      const names = await manageColumnNames(page);
+      checkRequiredColumns(names);
+      expect(tableHeaders, "bảng phải khớp danh sách trong Manage Columns").toEqual(["", ...names]);
       await expect(exportBtn(page)).toBeVisible();
       await expect(columnBtn(page)).toBeVisible();
       await expect(bulkBtn(page)).toBeVisible();
@@ -518,7 +524,7 @@ test.describe("Report > Failed Operator Request", () => {
       await dialogButton(page, "Cancel").click(); // KHÔNG bấm Confirm
       await expect(modal(page)).toBeHidden();
       expect(writes, "không được gọi API huỷ khi bấm Cancel").toEqual([]);
-      await expect(rowAt(page, 0).locator("td").nth(ALL_HEADERS.indexOf("Status"))).toHaveText("Pending");
+      await expect(rowAt(page, 0).locator("td").nth((await headers(page)).indexOf("Status"))).toHaveText("Pending");
     });
 
     test("Chọn dòng bằng checkbox thì mở khoá nút huỷ hàng loạt; bỏ chọn thì khoá lại", async ({ page }) => {
@@ -987,7 +993,7 @@ test.describe("Report > Failed Operator Request", () => {
     });
 
     test("Các cột còn lại không có chức năng sort", async ({ page }) => {
-      for (const column of COLUMNS.filter((c) => !["Bet Amount", "Win Amount"].includes(c))) {
+      for (const column of REQUIRED_COLUMNS.filter((c) => !["Bet Amount", "Win Amount"].includes(c))) {
         await expect(
           mainTable(page).locator("thead th", { hasText: exact(column) }),
           column,
@@ -1009,32 +1015,32 @@ test.describe("Report > Failed Operator Request", () => {
       await columnBtn(page).click();
       await expect(columnPopover(page)).toBeVisible();
 
-      const names = await columnPopover(page)
-        .locator(".NextGen-popover-manage-column__list__items .ant-typography")
-        .allInnerTexts();
-      expect(names.map((n) => n.trim())).toEqual(COLUMNS);
-      await expect(columnPopover(page).locator("input[type=checkbox]:checked")).toHaveCount(COLUMNS.length);
+      const names = await manageColumnNames(page);
+      checkRequiredColumns(names);
+      await expect(columnPopover(page).locator("input[type=checkbox]:checked")).toHaveCount(names.length);
       await expect(columnPopover(page).getByRole("button")).toHaveCount(0);
     });
 
     test("Bỏ chọn 1 cột -> cột ẩn khỏi bảng, chọn lại -> hiện lại", async ({ page }) => {
+      const all = await headers(page);
       await columnBtn(page).click();
       await item(page, "Retry").locator("label").click();
       expect(await headers(page)).not.toContain("Retry");
-      expect(await headers(page)).toHaveLength(ALL_HEADERS.length - 1);
+      expect(await headers(page)).toHaveLength(all.length - 1);
 
       await item(page, "Retry").locator("label").click();
-      expect(await headers(page)).toEqual(ALL_HEADERS);
+      expect(await headers(page)).toEqual(all);
     });
 
     // Không có nút Save / Reset to Default: cấu hình cột KHÔNG được lưu, reload trang (F5) thì hiện lại đủ cột
     test("Cấu hình cột KHÔNG được lưu: reload trang thì hiện lại đủ cột", async ({ page }) => {
+      const all = await headers(page);
       await columnBtn(page).click();
       await item(page, "IP Address").locator("label").click();
       expect(await headers(page)).not.toContain("IP Address");
 
       await openPage(page); // reload
-      expect(await headers(page)).toEqual(ALL_HEADERS);
+      expect(await headers(page)).toEqual(all);
     });
 
     test("Dữ liệu các cột còn lại vẫn hiển thị đúng khi ẩn bớt cột", async ({ page }) => {
@@ -1054,7 +1060,8 @@ test.describe("Report > Failed Operator Request", () => {
       expect(body.section).toBe("OPERATOR_REQUEST_DOWNLOAD");
       expect(payload.filters.timezoneId).toEqual(expect.any(Number));
       expect(payload.filters.betTime).toHaveLength(2);
-      expect(payload.filters.fields).toEqual(COLUMNS);
+      checkRequiredColumns(payload.filters.fields);
+      expect(payload.filters.fields, "Export phải gồm đúng các cột đang hiển thị trên bảng").toEqual((await headers(page)).filter(Boolean));
     });
 
     test("Export đi kèm đúng filter hiện tại", async ({ page }) => {
