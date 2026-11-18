@@ -26,7 +26,7 @@ Mỗi màn hình = 1 file `tests/<tên>.spec.js`. Trả lời user bằng **ti�
    - Màn hình báo cáo (filter + bảng + sort + phân trang + Manage Columns + Export): `tests/report_alert.spec.js`, `tests/report_game_recommendation.spec.js`
    - Danh sách CRUD (chọn dòng, thao tác hàng loạt, menu "..."): `tests/game_list.spec.js`
    - Form nhiều bước (wizard): `tests/game_update.spec.js`
-   - Helper dùng chung: `tests/helpers/index.js` (`selectRandomOption`) - kiểm tra file này trước khi viết helper mới
+   - Helper dùng chung: `tests/helpers/index.js` (`selectRandomOption`) và `tests/helpers/ui.js` (`filterEl`, `resetBtn`, `dialog`, `bodyOf`, `ORIGIN`, `openDropdown`, `selectedCount`, `waitTableIdle`, `settle`; bản `waitTableIdleScoped` / `settleScoped` cho màn hình có ô filter tìm phía server) - kiểm tra 2 file này trước khi viết helper mới. Chỉ import đúng tên cần dùng và KHÔNG khai báo lại tên đã import (xem comment đầu `ui.js`)
 2. **Khám phá bằng MCP** (xem mục *Cách khám phá*): filter, cột bảng, API (request body + response), sort, phân trang, nút, hộp thoại, điều hướng.
 3. **Viết spec** theo cấu trúc chuẩn (xem *Cấu trúc file spec*).
 4. **Kiểm tra cú pháp**: `--list` (không cần session, không gọi web).
@@ -188,7 +188,7 @@ Số test mỗi màn hình khoảng 50-80. Tên test bằng tiếng Việt, mô 
 - `openPage(page)`: `goto`, chờ response danh sách đầu tiên, **phát hiện bị chuyển về /login và báo lỗi rõ ràng**; `test.setTimeout(90000)`.
 - `search(page)` → `{ body, status, json }`; `reloadBy(page, action)` → request body sau 1 hành động (sort / đổi trang).
   Luôn `Promise.all([waitForRequest, waitForResponse, action()])`, rồi chờ `.ant-spin-spinning` biến mất.
-- `filterEl(page, id)`, `headers`, `columnValues(name)`, `tableRecords`, `exact(text)` (RegExp khớp chính xác, có escape).
+- `filterEl(page, id)` (import từ `tests/helpers/ui.js`), `headers`, `columnValues(name)`, `tableRecords`, `exact(text)` (RegExp khớp chính xác, có escape).
 - `isList` nhận diện đúng API của màn hình. Quả chuông header cũng gọi `alertreport/list` → phân biệt bằng nội dung body (vd `"timezoneId"`).
 - `watchWrites(page)`: ghi lại mọi POST không thuộc nhóm đọc (`list`, `details`, `view`, `download`, `dropdown`...).
   Nếu mở một hộp thoại có gọi API đọc mới (vd `gamesetting/view`) thì thêm vào danh sách đọc, đừng coi là ghi.

@@ -20,7 +20,8 @@ npm run test:ui:report         // tests/report_*
 npm run test:ui:house          // tests/house_*
 npm run test:ui:master-agent   // tests/master_agent_*
 npm run test:ui:agent          // tests/agent_*
-npm run test:ui:other          // player, download_history, user, user_menu, dashboard
+npm run test:ui:dashboard      // dashboard
+npm run test:ui:other          // player, download_history, user, user_menu
 npm run test:ui                // full (tất cả nhóm trên)
 // Chạy 1 file: npm run test:ui -- tests/report_alert.spec.js
 

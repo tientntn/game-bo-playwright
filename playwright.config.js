@@ -8,6 +8,9 @@ const path = require("path");
 // quiet: true để tắt dòng "tip" quảng cáo mà dotenv tự in ra console mỗi lần gọi config()
 dotenv.config({ path: path.resolve(__dirname, ".env"), quiet: true });
 
+// Phải require SAU dotenv.config vì flags.js đọc process.env ngay khi được nạp
+const { RUN_FULL_TESTS } = require("./tests/helpers/flags");
+
 // Lấy domain dự phòng nếu file .env chưa nhận diện được
 const boDomain = process.env.BO_DOMAIN || "dev-bo.royaledge.io";
 
@@ -76,6 +79,10 @@ module.exports = defineConfig({
     baseURL: `https://${boDomain}/`,
     // Chỉ chụp ảnh khi test fail (không tốn thời gian cho test pass) để đính vào test-results/failures.md
     screenshot: "only-on-failure",
+    // Chỉ ghi trace (từng bước + ảnh DOM + request/response) ở lần CHẠY LẠI thứ 1 của test fail, nên cần retries > 0
+    // (project chromium bên dưới đã đặt retries: 1). Mở bằng: npx playwright show-trace <test-results/.../trace.zip>
+    // Lưu ý: trace chứa cả header request (có token đăng nhập) - không gửi ra ngoài.
+    trace: "on-first-retry",
     // Mặc định click/fill/waitFor KHÔNG có giới hạn riêng nên khi locator sai phải chờ hết test timeout (90-240s).
     // Đặt giới hạn để thao tác kẹt fail sau 30s. Lưu ý: actionTimeout cũng là timeout MẶC ĐỊNH của
     // page.waitForResponse / waitForRequest (không truyền { timeout }) nên 15s làm nhiều test chờ API chậm fail oan.
@@ -96,6 +103,10 @@ module.exports = defineConfig({
       name: "chromium",
       testDir: "./tests",
       testIgnore: [/.*\.setup\.js/, /api[\\/]/],
+      // Test fail được chạy lại 1 lần để phân biệt lỗi chập chờn (pass khi chạy lại -> mục "Test chập chờn" trong
+      // test-results/failures.md) với lỗi thật. KHÔNG retry khi RUN_FULL_TESTS=true: nhóm test serial ghi dữ liệu
+      // thật sẽ chạy lại từ đầu và tạo thêm bản ghi QA. Cờ --retries trên dòng lệnh vẫn ghi đè giá trị này.
+      retries: RUN_FULL_TESTS ? 0 : 1,
       use: {
         ...devices["Desktop Chrome"],
         storageState: {
@@ -125,6 +136,9 @@ module.exports = defineConfig({
     {
       name: "api",
       testDir: "./tests/api",
+      // Không retry: một số test cố tình giữ FAIL vì lỗi backend đã biết (xem tests/api/KNOWN_ISSUES.md),
+      // chạy lại chỉ tốn thời gian.
+      retries: 0,
       use: {
         baseURL: apiBaseURL,
       },

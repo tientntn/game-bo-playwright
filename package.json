@@ -8,7 +8,8 @@
     "test:ui:house": "playwright test tests/house_ --project=setup --project=chromium --workers=4",
     "test:ui:master-agent": "playwright test tests/master_agent_ --project=setup --project=chromium --workers=4",
     "test:ui:agent": "playwright test tests/agent_ --project=setup --project=chromium --workers=4",
-    "test:ui:other": "playwright test tests/player tests/download_history tests/user tests/dashboard --project=setup --project=chromium --workers=4"
+    "test:ui:dashboard": "playwright test tests/dashboard --project=setup --project=chromium --workers=4",
+    "test:ui:other": "playwright test tests/player tests/download_history tests/user --project=setup --project=chromium --workers=4"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
