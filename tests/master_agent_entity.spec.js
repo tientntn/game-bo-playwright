@@ -30,7 +30,7 @@
 //  - Không hard-code dữ liệu: house / master agent / currency / game category / id đều lấy từ response list và dropdown; id màn hình con
 //    lấy từ icon ở dòng.
 const { test, expect } = require("@playwright/test");
-const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle } = require("./helpers/ui");
+const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -452,7 +452,7 @@ test.describe("Master Agents > Master Agents (danh sách)", () => {
       for (const i of [...new Set([0, json.data.list.findIndex((x) => x.status !== json.data.list[0].status)])].filter((v) => v >= 0)) {
         await openRowMenu(page, i);
         const toggle = json.data.list[i].status === 1 ? "Deactivate" : "Activate";
-        expect((await menuItems(page).allInnerTexts()).map(norm), `dòng ${i + 1}`).toEqual([toggle, "Create Master Agent User"]);
+        checkMenuItems((await menuItems(page).allInnerTexts()).map(norm), [toggle, "Create Master Agent User"], `dòng ${i + 1}`);
         await closeRowMenu(page);
       }
     });

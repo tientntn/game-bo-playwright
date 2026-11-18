@@ -35,7 +35,7 @@
 //  - Không hard-code dữ liệu: user / role đều lấy từ response list và dropdown; id màn hình con lấy từ icon ở dòng.
 //  - Toast của Create / Reset (nhánh response GIẢ) không phản ánh server thật; luồng "tạo user QA lần đầu" chỉ kiểm chứng khi chạy thật.
 const { test, expect } = require("@playwright/test");
-const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
+const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
@@ -573,7 +573,7 @@ test.describe("Administration > Users", () => {
         for (const i of [...new Set([0, other])].filter((v) => v >= 0)) {
           await openRowMenu(page, i);
           const toggle = json.data.list[i].status === 1 ? "Deactivate" : "Activate";
-          expect((await menuItems(page).allInnerTexts()).map(norm), `dòng ${i + 1}`).toEqual([toggle, "Reset Password", "Reset 2FA"]);
+          checkMenuItems((await menuItems(page).allInnerTexts()).map(norm), [toggle, "Reset Password", "Reset 2FA"], `dòng ${i + 1}`);
           await closeRowMenu(page);
         }
       });

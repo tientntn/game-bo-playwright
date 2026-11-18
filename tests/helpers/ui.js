@@ -8,7 +8,7 @@
 // Màn hình cần hành vi khác (vd hộp thoại riêng, spinner riêng) thì khai báo hàm riêng với TÊN KHÁC hoặc không import tên đó.
 // Màn hình mà ô filter tìm phía server làm spinner chạy lâu dùng bản "Scoped":
 //   const { waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
-const { expect } = require("@playwright/test");
+const { test, expect } = require("@playwright/test");
 
 // Phần tử bao 1 filter (theo id của input bên trong)
 const filterEl = (page, id) => page.locator(".NextGen-filter-element").filter({ has: page.locator(`#${id}`) });
@@ -70,6 +70,14 @@ async function settleScoped(page) {
   await waitTableIdleScoped(page);
 }
 
+// Menu "..." của dòng: các mục BẮT BUỘC (required) phải có đủ và đúng thứ tự. Mục mới KHÔNG làm test fail, chỉ được ghi chú vào
+// kết quả test (annotation "mục menu mới") để biết giao diện vừa thêm mục. Chỉ gọi bên trong test (dùng test.info()).
+function checkMenuItems(items, required, message) {
+  expect(items.filter((t) => required.includes(t)), message).toEqual(required);
+  const extra = items.filter((t) => !required.includes(t));
+  if (extra.length) test.info().annotations.push({ type: "mục menu mới", description: extra.join(", ") });
+}
+
 module.exports = {
   filterEl,
   resetBtn,
@@ -82,4 +90,5 @@ module.exports = {
   settle,
   waitTableIdleScoped,
   settleScoped,
+  checkMenuItems,
 };
