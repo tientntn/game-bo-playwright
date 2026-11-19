@@ -106,7 +106,8 @@ const SECTION_TEXT = {
 const DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 const MSG = {
   noEntries: "There are no entries found",
-  expire: "File expires in 7 days",
+  // Tooltip đếm ngược số ngày còn lại của file (file mới tạo: 7 days, hôm sau: 6 days...)
+  expire: /^\s*File expires in \d+ days?\s*$/,
   deleteOne: (id) => `Delete downloaded file with id ${id}`,
   deleteOneText: "Are you sure you want to delete this file?",
   deleteBulkOneText: "Are you sure you want to delete this downloaded file?",
@@ -180,7 +181,9 @@ const dateRangeInput = (page) => page.locator("#startTime_dateRange");
 const columnBtn = (page) => page.locator("button.NextGen-popover-manage-column__buton");
 const columnPopover = (page) => page.locator(".NextGen-popover-manage-column");
 const toasts = (page) => page.locator(".Toastify__toast");
-const tooltip = (page, text) => page.locator(".ant-tooltip:not(.ant-tooltip-hidden)").filter({ hasText: exact(text) });
+// text: chuỗi (khớp chính xác) hoặc RegExp (khi nội dung đổi theo dữ liệu, vd số ngày còn lại)
+const tooltip = (page, text) =>
+  page.locator(".ant-tooltip:not(.ant-tooltip-hidden)").filter({ hasText: text instanceof RegExp ? text : exact(text) });
 // Hộp thoại Delete (1 dòng: .NextGen-modal-delete; bulk: class khác) -> dùng chung .ant-modal-content (chỉ có 1 hộp thoại mở tại 1 thời điểm)
 const dialog = (page) => page.locator(".ant-modal-content");
 // Tên accessible của nút có thể kèm icon ("close Cancel") -> khớp phần cuối
@@ -544,7 +547,7 @@ test.describe("Download History", () => {
         }
       });
 
-      test("Hover icon (i) cạnh Completed hiện tooltip 'File expires in 7 days'", async ({ page }) => {
+      test("Hover icon (i) cạnh Completed hiện tooltip 'File expires in N days'", async ({ page }) => {
         await ensureData(page);
         const i = (await tableMatrix(page)).findIndex((m) => m.hasExpire);
         test.skip(i < 0, "Không có bản ghi Completed ở trang đầu");
@@ -690,13 +693,15 @@ test.describe("Download History", () => {
         await expect(summary(page)).toHaveCount(0);
       });
 
-      // HÀNH VI HIỆN TẠI CẦN XÁC NHẬN: ô ID là ô text, không chặn chữ; giá trị không phải số bị app đổi thành null -> filter bị BỎ QUA và bảng trả toàn bộ danh sách
-      test("ID không phải số ('abc'): app gửi downloadId = null, filter bị bỏ qua và bảng trả toàn bộ danh sách (hành vi hiện tại)", async ({ page }) => {
+      // HÀNH VI HIỆN TẠI CẦN XÁC NHẬN: ô ID là ô text, không chặn chữ; giá trị không phải số bị app đổi thành null -> filter ID bị BỎ QUA
+      // (khi chỉ nhập ID, app tự gắn startTime = hôm nay nên bảng chỉ có bản ghi của hôm nay - có thể rỗng nếu hôm nay chưa export gì,
+      // vì vậy không kiểm tra số dòng trả về)
+      test("ID không phải số ('abc'): app gửi downloadId = null, filter ID bị bỏ qua, request vẫn thành công (hành vi hiện tại)", async ({ page }) => {
         await typeFilter(page, "downloadId", "abc");
         const { body, status, json } = await search(page);
         expect(status).toBe(200);
         expect(body.filters.downloadId).toBeNull();
-        expect(json.data.list.length).toBeGreaterThan(0);
+        expect(Array.isArray(json.data.list)).toBe(true);
       });
 
       // HÀNH VI HIỆN TẠI CẦN XÁC NHẬN: ID thập phân hoặc quá lớn vẫn được gửi lên và server trả HTTP 400 (app không chặn, không hiện thông báo lỗi nào)

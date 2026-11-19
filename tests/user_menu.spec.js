@@ -121,7 +121,8 @@ const FAKE_OLD = "QaFakeOld#1234";
 const FAKE_NEW = "QaFakeNew#5678";
 
 // Request đọc dữ liệu - mọi POST tới boapi còn lại coi là GHI (user/change-password, auth/logout...)
-const READ = /\/(list|details|download|view|summary)(\?|$)|\/dropdown|ggr-trend|top-/;
+// (download/status là request app tự gọi định kỳ để cập nhật trạng thái Download History -> không phải request ghi)
+const READ = /\/(list|details|download|view|summary|status)(\?|$)|\/dropdown|ggr-trend|top-/;
 
 // ---------------------------------------------------------------------------
 // Helpers
