@@ -1053,8 +1053,9 @@ test.describe("Agents > Agents (danh sách)", () => {
       await openRowMenu(page, 0);
       await menuItems(page).filter({ hasText: exact(action) }).click();
       await expect(dialog(page)).toBeVisible();
-      await expect(dialog(page)).toContainText(`${action} ${norm(x.name)} agent`);
-      // Quan sát: nội dung hiện là "Are you sure you want to ${action} these <tên> agents?" (số nhiều dù chỉ 1 dòng) -> chỉ kiểm tra phần chắc chắn
+      // Tiêu đề hộp thoại là "<Activate|Deactivate> <tên>" (FE đã bỏ chữ "agent" ở tiêu đề - chủ ý)
+      await expect(dialog(page).getByRole("heading")).toHaveText(`${action} ${norm(x.name)}`);
+      // Quan sát: nội dung hiện là "Are you sure you want to ${action} this <tên> agent?" -> chỉ kiểm tra phần chắc chắn
       await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()}`);
       await expect(dialog(page)).toContainText(norm(x.name));
       await expect(dialog(page).getByRole("button", { name: new RegExp(`${action}$`) })).toBeVisible();
@@ -1280,7 +1281,15 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
   const masterSelect = (page) => field(page, "Master Agent Name").locator(".ant-select").first();
   const currencySelect = (page) => field(page, "Currency").locator(".ant-select").first();
   const categorySelect = (page) => field(page, "Game Category").locator(".ant-select").first();
-  const words = (s) => norm(s).split(" ").filter(Boolean);
+  // Text của từng chip (vd mã currency) trong 1 ô: mỗi chip là 1 phần tử riêng và giữa chúng KHÔNG có khoảng trắng trong DOM,
+  // nên innerText của cả ô bị dính ("AMDPHPUSD") -> lấy text của các phần tử lá thay vì tách chuỗi
+  const chipTexts = (locator) =>
+    locator.evaluate((el) =>
+      [...el.querySelectorAll("*")]
+        .filter((e) => e.children.length === 0)
+        .map((e) => e.textContent.trim())
+        .filter(Boolean),
+    );
 
   test.beforeEach(async ({ page }) => {
     await clearSavedState()(page);
@@ -1332,7 +1341,7 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
     test("Supported Currencies / Game Category khớp response agent/view", async ({ page }) => {
       const { view } = await openChild(page, 0);
       await expect(descValue(page, "Supported Currencies")).toBeVisible();
-      const cur = words(await descValue(page, "Supported Currencies").innerText());
+      const cur = await chipTexts(descValue(page, "Supported Currencies"));
       expect([...cur].sort()).toEqual(view.currencies.map((c) => c.code).sort());
       // View hiển thị code của category (vd SLOTS), danh sách / Review hiển thị tên
       const cat = norm(await descValue(page, "Game Category").innerText()).toLowerCase();
@@ -1402,7 +1411,7 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
       await expect(descValue(page, "Agent Code")).toHaveText(norm(x.code));
       await expect(descValue(page, "Site URL")).toHaveText(norm(x.siteUrl));
       await expect(descValue(page, "Status")).toHaveText(statusOf(x));
-      const cur = words(await descValue(page, "Supported Currencies").innerText());
+      const cur = await chipTexts(descValue(page, "Supported Currencies"));
       expect([...cur].sort()).toEqual(view.currencies.map((c) => c.code).sort());
       await expect(submitBtn(page)).toBeVisible(); // KHÔNG bấm Submit thật
       await prevBtn(page).click();
