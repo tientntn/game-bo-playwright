@@ -338,6 +338,27 @@ const modalFields = (page) =>
         })),
     );
 
+// Nhận diện đúng dòng log để QA tìm lại trên BO: "id 19575 | 19-11-2026 18:04:54 | datmasteragent | Agents / Agent | Applied To: e2emcndvovo74"
+const logLabel = (x) => `id ${x.id} | ${x.time} | ${x.username} | ${x.module} / ${x.entity} | Applied To: ${x.appliedTo}`;
+
+// Field thực sự thay đổi theo response log/view (before / after là chuỗi JSON): "currency: [\"TKN\"] -> [\"TKN\",\"USD\"]"; rỗng nếu before = after
+function apiChanges(view) {
+  try {
+    const first = (s) => {
+      const v = JSON.parse(s || "null");
+      return (Array.isArray(v) ? v[0] : v) || {};
+    };
+    const b = first(view.before);
+    const a = first(view.after);
+    return [...new Set([...Object.keys(b), ...Object.keys(a)])]
+      .filter((k) => JSON.stringify(b[k]) !== JSON.stringify(a[k]))
+      .map((k) => `${k}: ${JSON.stringify(b[k] ?? "")} -> ${JSON.stringify(a[k] ?? "")}`)
+      .join("; ");
+  } catch {
+    return "";
+  }
+}
+
 // Tìm trang đầu: dòng đầu tiên có actionType chứa 1 action cho trước (Search theo filter Action Type); trả về { list } hoặc null
 async function searchAction(page, label) {
   await selectOption(page, "actionType", label);
@@ -588,9 +609,14 @@ test.describe("Administration > Audit Logs", () => {
       // Chỉ lấy dòng chỉ có đúng action Update (log gộp nhiều action có thể hiển thị khác)
       const i = data.list.findIndex((x) => x.actionType.length === 1);
       test.skip(i < 0, "Không có log chỉ có action Update ở trang đầu");
-      await openDetails(page, i, data.list[i].id);
+      const view = await openDetails(page, i, data.list[i].id);
       const fields = await modalFields(page);
-      expect(fields.length, "log Update phải liệt kê field thay đổi").toBeGreaterThan(0);
+      // Message nêu rõ dòng log + thay đổi thật theo API để QA mở đúng dòng đó trên BO kiểm tra lại (xem README / failures.md)
+      const changes = apiChanges(view) || "không có (before = after)";
+      expect(
+        fields.length,
+        `modal Changes của log Update [${logLabel({ ...data.list[i], module: view.module, entity: view.entity })}] không liệt kê field nào, trong khi response log/view có thay đổi: ${changes}`,
+      ).toBeGreaterThan(0);
       for (const f of fields) expect(f.oldValue, `${f.field}: Old Value phải khác New Value`).not.toBe(f.newValue);
     });
 

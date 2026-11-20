@@ -34,6 +34,14 @@ npm run test:ui                // full (tất cả nhóm trên)
 // Liệt kê 15 file chạy lâu nhất của lần chạy gần nhất:
 // node -e "const r=require('./test-results/timings.json'),m={};(function w(s){(s.specs||[]).forEach(p=>p.tests.forEach(t=>t.results.forEach(x=>m[p.file]=(m[p.file]||0)+x.duration)));(s.suites||[]).forEach(w)})(...r.suites.map(s=>s));Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,15).forEach(([f,d])=>console.log((d/60000).toFixed(1)+' phút (tổng thời gian test)',f))"
 
+// Lịch sử kết quả theo ngày (không bị ghi đè như test-results/): sau mỗi lần chạy có test chạy thật,
+// reporter tests/helpers/history-reporter.js ghi vào thư mục test-history/ (nên commit thư mục này):
+//   summary.csv       mỗi lần chạy 1 dòng: ngày, giờ, số phút, full/partial, tổng, đạt, chập chờn, lỗi, skip
+//   YYYY-MM-DD.json   trạng thái từng test + lý do lỗi của lần chạy FULL gần nhất trong ngày
+// Chạy xong tự in so sánh với ngày trước (test mới / mất / mới lỗi / hết lỗi). So sánh tay:
+// node tests/helpers/history-reporter.js 2026-11-19 2026-11-20      (bỏ tham số = 2 ngày gần nhất)
+// Lần chạy một phần (vd test:ui:dashboard, < 90% tổng test) chỉ thêm dòng vào summary.csv. `--list` không ghi gì.
+
 // authentication:
 Login to https://dev-bo.royaledge.io/
 F12, copy all Local storage and past to file: playwright/.auth/session.txt

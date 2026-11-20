@@ -72,6 +72,8 @@ module.exports = defineConfig({
     ["json", { outputFile: "test-results/timings.json" }],
     // Gom test lỗi vào test-results/failures.md cho QA đọc (loại lỗi, các bước, ảnh, lệnh chạy lại)
     ["./tests/helpers/failures-reporter.js"],
+    // Lưu kết quả mỗi ngày vào test-history/ (không bị ghi đè như test-results/) để đối chiếu giữa các ngày
+    ["./tests/helpers/history-reporter.js"],
   ],
   // expect(...) fail sau 10s (mặc định 5s) - test.setTimeout() trong spec vẫn giữ nguyên cho luồng dài.
   expect: { timeout: 10_000 },
