@@ -24,8 +24,11 @@ const bodyOf = (req) => {
   return rest;
 };
 
-// Origin của BO dev (dùng cho header CORS khi trả response giả cho request ghi)
-const ORIGIN = "https://dev-bo.royaledge.io";
+// Origin của BO đang test (dùng cho header CORS khi trả response giả cho request ghi).
+// PHẢI trùng origin của trang (BO_DOMAIN trong .env, cùng nguồn với baseURL ở playwright.config.js): response giả mà
+// access-control-allow-origin lệch origin của trang thì trình duyệt chặn response -> app không nhận được gì,
+// không hiện toast Success/Error và hộp thoại không đóng.
+const ORIGIN = `https://${process.env.BO_DOMAIN || "dev-bo.royaledge.io"}`;
 
 // Mở dropdown của 1 filter bằng cách click vào LABEL (tiêu đề nổi) của ô.
 // KHÔNG click giữa ô: với dropdown chọn nhiều, vị trí đó có thể rơi vào nút (x) của chip đã chọn
