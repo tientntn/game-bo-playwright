@@ -1053,8 +1053,8 @@ test.describe("Agents > Agents (danh sách)", () => {
       await openRowMenu(page, 0);
       await menuItems(page).filter({ hasText: exact(action) }).click();
       await expect(dialog(page)).toBeVisible();
-      // Tiêu đề hộp thoại là "<Activate|Deactivate> <tên>" (FE đã bỏ chữ "agent" ở tiêu đề - chủ ý)
-      await expect(dialog(page).getByRole("heading")).toHaveText(`${action} ${norm(x.name)}`);
+      // Tiêu đề hộp thoại bắt đầu bằng "<Activate|Deactivate> <tên>"; FE lúc thêm lúc bỏ chữ "agent" ở cuối nên không kiểm tra phần đuôi
+      await expect(dialog(page).getByRole("heading")).toHaveText(new RegExp(`^\\s*${action}\\s+${norm(x.name).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}`));
       // Quan sát: nội dung hiện là "Are you sure you want to ${action} this <tên> agent?" -> chỉ kiểm tra phần chắc chắn
       await expect(dialog(page)).toContainText(`Are you sure you want to ${action.toLowerCase()}`);
       await expect(dialog(page)).toContainText(norm(x.name));

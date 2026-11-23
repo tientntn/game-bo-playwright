@@ -477,10 +477,10 @@ test.describe("Administration > Audit Logs", () => {
         expect(c[COL.time], at).toBe(x.time);
         expect(c[COL.username], at).toBe(norm(x.username));
         expect(matrix[i].tags[COL.actionType], at).toEqual(x.actionType);
-        // Hành vi đã xác nhận (đúng thiết kế FE): màn hình hiển thị tên module có dấu cách ("Game Paytable") còn API trả dạng liền ("GamePaytable")
+        // Hành vi đã xác nhận (đúng thiết kế FE): màn hình hiển thị tên Module / Entity có dấu cách ("Game Paytable") còn API trả dạng liền ("GamePaytable")
         // -> so sánh bỏ qua khoảng trắng
         expect(c[COL.module].replace(/\s+/g, ""), at).toBe(norm(x.module).replace(/\s+/g, ""));
-        expect(c[COL.entity], at).toBe(norm(x.entity));
+        expect(c[COL.entity].replace(/\s+/g, ""), at).toBe(norm(x.entity).replace(/\s+/g, ""));
         expect(c[COL.appliedTo], at).toBe(norm(x.appliedTo));
         expect(c[COL.ip], at).toBe(norm(x.ip));
       }
