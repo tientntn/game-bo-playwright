@@ -1234,11 +1234,29 @@ test.describe("Administration > Currency", () => {
           const { json } = await search(page);
           test.skip(json.data.list.length === 0, "Không có dữ liệu");
           await openUpdate(page, rowAt(page, 0));
-          await fillForm(page, { exchangeRate: value });
+          // Luật FE: Sweep Stake BẬT thì Exchange Rate = 0 hợp lệ (chỉ cấm số âm), chỉ khi Sweep TẮT mới báo "greater than 0"
+          // -> tắt Sweep trước để kết quả không phụ thuộc trạng thái Sweep của dòng đầu (xem test ngay bên dưới cho trường hợp Sweep bật)
+          await fillForm(page, { exchangeRate: value, isSweep: false });
           await saveBtn(page).click();
           await expect(formErrors(page)).toHaveText([msg]);
         });
       }
+
+      test("Sweep Stake bật: Exchange Rate = 0 hợp lệ, không báo lỗi và gửi currency/update (request GIẢ)", async ({ page }) => {
+        const { json } = await search(page);
+        test.skip(json.data.list.length === 0, "Không có dữ liệu");
+        const x = json.data.list[0];
+        await mockWrites(page, MOCK_OK);
+        await openUpdate(page, rowAt(page, 0));
+        // Max Payout đặt giá trị hợp lệ vì dòng đầu có thể đang để 0 (form từ chối 0 ở Max Payout)
+        await fillForm(page, { maxPayout: "100", exchangeRate: "0", isSweep: true });
+        const [req] = await Promise.all([page.waitForRequest(isUpdate), saveBtn(page).click()]);
+        const body = bodyOf(req);
+        allowedWrites.push({ url: "currency/update", body });
+        expect(body).toMatchObject({ id: x.id, exchangeRate: "0", maxPayout: "100", isSweep: 1 });
+        await expect(formErrors(page)).toHaveCount(0);
+        await expect(toasts(page).filter({ hasText: "Success" })).toBeVisible();
+      });
 
       test("Đổi Name / Max Payout / Exchange Rate / Sweep Stake / Status rồi Save: gửi currency/update đủ trường + id, toast Success, đóng hộp thoại (request GIẢ)", async ({ page }) => {
         const { json } = await search(page);
