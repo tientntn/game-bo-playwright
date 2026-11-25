@@ -38,6 +38,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
+const { expectPersisted, relationMismatches, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -412,14 +413,18 @@ async function pickHouseMaWithRoles(page, houses) {
     rolesOf.set(ma.value, roles);
     return roles.length > 0 ? { house, ma, mas: masOf.get(house.value), roles } : null;
   };
-  for (const x of LIST_HINT.filter((r) => r.roleList?.length > 0)) {
+  // House đầu của dropdown thường là house mặc định: thử các cặp thuộc house KHÁC mặc định trước (nếu server luôn gán mặc định thì lộ ra)
+  const isDefault = (h) => h && houses[0] && h.value === houses[0].value;
+  const hintHouse = (x) => uniq.find((h) => norm(h.label) === norm(houseOf(x).name));
+  const hints = LIST_HINT.filter((r) => r.roleList?.length > 0).sort((a, b) => Number(isDefault(hintHouse(a))) - Number(isDefault(hintHouse(b))));
+  for (const x of hints) {
     const hit = await attempt(
       uniq.find((h) => norm(h.label) === norm(houseOf(x).name)),
       (list) => list.find((m) => m.sasEntityId === x.sasEntityId),
     );
     if (hit) return hit;
   }
-  for (const house of [...uniq].sort(qaFirst).slice(0, 4)) {
+  for (const house of [...uniq].sort((a, b) => Number(isDefault(a)) - Number(isDefault(b)) || qaFirst(a, b)).slice(0, 4)) {
     const hit = await attempt(house, (list) => list.sort(qaFirst)[0]);
     if (hit) return hit;
   }
@@ -486,6 +491,25 @@ test.describe("Master Agent > Users", () => {
     // Mọi test không được gửi request ghi nào ngoài danh sách được phép (và request được phép cũng không tới server thật)
     test.afterEach(async () => {
       expect(writes, "Request ghi dữ liệu bắt được phải đúng danh sách được phép").toEqual(allowedWrites);
+    });
+
+    // Kiểm tra CHÉO (chỉ đọc): master agent hiển thị của mỗi user phải là master agent có sasEntityId = sasEntityId của user, và house hiển thị
+    // phải là house CỦA master agent đó (theo masteragent/list). Bắt được lỗi server lưu / hiển thị sai cha (vd gán house mặc định). Quét tối đa 200 user.
+    test("Mọi user: Master Agent và House hiển thị khớp master agent theo sasEntityId của user", async ({ page }) => {
+      const maBySas = bySasEntityId((await captureFullList(page, "/masteragent/list", "/master-agent/entity")).data.list);
+      const list = (await captureFullList(page, "/user/listhierarchy", URL)).data.list;
+      test.skip(list.length === 0, "Không có dữ liệu");
+      const maRows = [];
+      const houseRows = [];
+      for (const x of list) {
+        const ma = maBySas.get(String(x.sasEntityId));
+        const label = `User id ${x.id} "${x.username}"`;
+        const why = `sasEntityId = ${x.sasEntityId}`;
+        maRows.push({ label, why, expected: codeRef(ma), shown: [["cột Master Agent của danh sách", codeRef(maOf(x))]] });
+        houseRows.push({ label, why: `${why} (house của master agent đó)`, expected: codeRef(ma && ma.house), shown: [["cột House của danh sách", codeRef(houseOf(x))]] });
+      }
+      const bad = [...relationMismatches("master agent", maRows), ...relationMismatches("house", houseRows)];
+      expect(bad, `${bad.length} sai lệch quan hệ master agent / house của user`).toEqual([]);
     });
 
     // ===== 1. Hiển thị màn hình =====
@@ -2152,6 +2176,16 @@ test.describe("Master Agent > Users", () => {
       expect(after.data.list).toHaveLength(1);
       const x = after.data.list[0];
       expect(x).toMatchObject({ username: f.username, name: f.name, status: 0, sasEntityId: f.ma.sasEntityId });
+      // So house / master agent hiển thị (danh sách) với cái đã chọn: server trả success nhưng lưu / hiển thị sai cha sẽ lộ ra ở đây
+      expectPersisted(
+        [
+          ["house đã chọn (mã) ↔ entityParent.House.code", f.house.code, houseOf(x).code],
+          ["master agent đã chọn (mã) ↔ entityParent.Master Agent.code", f.ma.code, maOf(x).code],
+        ],
+        "User server lưu / hiển thị khác dữ liệu đã chọn khi tạo (user/create trả success)",
+      );
+      await expect(cellAt(page, 0, COL.house)).toHaveText(norm(f.house.label));
+      await expect(cellAt(page, 0, COL.ma)).toHaveText(norm(f.ma.label));
       await expect(cellAt(page, 0, COL.username)).toHaveText(f.username);
       await expect(cellAt(page, 0, COL.name)).toHaveText(f.name);
       await expect(cellAt(page, 0, COL.status)).toHaveText("Inactive");

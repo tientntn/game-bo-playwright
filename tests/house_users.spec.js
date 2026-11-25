@@ -34,6 +34,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
+const { expectPersisted, relationMismatches, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -364,7 +365,13 @@ async function pickRoles(page, labels) {
 // Chọn house đầu tiên (ưu tiên house QA) có role rồi 1 role của nó. Trả về { house, roles }
 async function pickHouseWithRoles(page, houses) {
   const cands = uniqueByLabel(houses);
-  cands.sort((a, b) => Number(/^QA Test House/.test(b.label)) - Number(/^QA Test House/.test(a.label)));
+  // House đầu của dropdown thường là house mặc định: thử SAU CÙNG để house đã chọn khác mặc định (nếu server luôn gán mặc định thì lộ ra)
+  const defaultHouse = houses[0];
+  cands.sort(
+    (a, b) =>
+      Number(/^QA Test House/.test(b.label)) - Number(/^QA Test House/.test(a.label)) ||
+      Number(a.value === defaultHouse?.value) - Number(b.value === defaultHouse?.value),
+  );
   for (const house of cands) {
     const roles = await pickHouse(page, house.label);
     if (roles.length > 0) return { house, roles };
@@ -429,6 +436,22 @@ test.describe("House > House Users", () => {
     // Mọi test không được gửi request ghi nào ngoài danh sách được phép (và request được phép cũng không tới server thật)
     test.afterEach(async () => {
       expect(writes, "Request ghi dữ liệu bắt được phải đúng danh sách được phép").toEqual(allowedWrites);
+    });
+
+    // Kiểm tra CHÉO (chỉ đọc): house hiển thị của mỗi user phải là house có sasEntityId = sasEntityId của user.
+    // Bắt được lỗi server lưu / hiển thị sai house (vd gán house mặc định) dù API ghi trả success. Quét tối đa 200 user.
+    test("Mọi user: House hiển thị khớp house theo sasEntityId của user", async ({ page }) => {
+      const houseBySas = bySasEntityId((await captureFullList(page, "/house/list", "/house/entity")).data.list);
+      const list = (await captureFullList(page, "/user/listhierarchy", URL)).data.list;
+      test.skip(list.length === 0, "Không có dữ liệu");
+      const rows = list.map((x) => ({
+        label: `User id ${x.id} "${x.username}"`,
+        why: `sasEntityId = ${x.sasEntityId}`,
+        expected: codeRef(houseBySas.get(String(x.sasEntityId))),
+        shown: [["cột House của danh sách", codeRef(houseOf(x))]],
+      }));
+      const bad = relationMismatches("house", rows);
+      expect(bad, `${bad.length} user có house hiển thị không khớp sasEntityId`).toEqual([]);
     });
 
     // ===== 1. Hiển thị màn hình =====
@@ -1881,6 +1904,12 @@ test.describe("House > House Users", () => {
       expect(after.data.list).toHaveLength(1);
       const x = after.data.list[0];
       expect(x).toMatchObject({ username: f.username, name: f.name, status: 0, sasEntityId: f.house.sasEntityId });
+      // So house hiển thị (danh sách) với house đã chọn: server trả success nhưng lưu / hiển thị sai house sẽ lộ ra ở đây
+      expectPersisted(
+        [["house đã chọn (mã) ↔ entityParent.House.code", f.house.code, houseOf(x).code]],
+        "User server lưu / hiển thị khác dữ liệu đã chọn khi tạo (user/create trả success)",
+      );
+      await expect(cellAt(page, 0, COL.house)).toHaveText(norm(f.house.label));
       await expect(cellAt(page, 0, COL.username)).toHaveText(f.username);
       await expect(cellAt(page, 0, COL.name)).toHaveText(f.name);
       await expect(cellAt(page, 0, COL.status)).toHaveText("Inactive");

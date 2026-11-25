@@ -35,6 +35,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
+const { relationMismatches, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -435,6 +436,29 @@ test.describe("Agent > Agent Roles", () => {
     // Mọi test không được gửi request ghi nào ngoài danh sách được phép (và request được phép cũng không tới server thật)
     test.afterEach(async () => {
       expect(writes, "Request ghi dữ liệu bắt được phải đúng danh sách được phép").toEqual(allowedWrites);
+    });
+
+    // Kiểm tra CHÉO (chỉ đọc): agent hiển thị của mỗi role phải là agent có sasEntityId = entityId của role, còn master agent và house hiển thị phải là
+    // master agent và house CỦA agent đó (theo agent/list). Bắt được lỗi server lưu / hiển thị sai cha. Quét tối đa 200 role.
+    test("Mọi role: Agent, Master Agent và House hiển thị khớp agent theo entityId của role", async ({ page }) => {
+      const agentBySas = bySasEntityId((await captureFullList(page, "/agent/list", "/agent/entity")).data.list);
+      const list = (await captureFullList(page, "/role/listhierarchy", URL)).data.list;
+      test.skip(list.length === 0, "Không có dữ liệu");
+      const bad = [];
+      for (const [name, pick, shown, expectedOf] of [
+        ["agent", agentOf, "cột Agent", (a) => a],
+        ["master agent", masterOf, "cột Master Agent", (a) => a && a.masterAgent],
+        ["house", houseOf, "cột House", (a) => a && a.house],
+      ]) {
+        const rows = list.map((x) => ({
+          label: `Role id ${x.id} "${x.code}"`,
+          why: `entityId = ${x.entityId}` + (name === "agent" ? "" : " (cha của agent đó)"),
+          expected: codeRef(expectedOf(agentBySas.get(String(x.entityId)))),
+          shown: [[`${shown} của danh sách`, codeRef(pick(x))]],
+        }));
+        bad.push(...relationMismatches(name, rows));
+      }
+      expect(bad, `${bad.length} sai lệch quan hệ agent / master agent / house của role`).toEqual([]);
     });
 
     // ===== 1. Hiển thị màn hình =====
@@ -1812,6 +1836,9 @@ test.describe("Agent > Agent Roles", () => {
       await expect(rowAt(page, 0).locator("td").nth(COL.code)).toHaveText(code);
       await expect(rowAt(page, 0).locator("td").nth(COL.name)).toHaveText(name);
       await expect(cellAt(page, 0, COL.agent)).toHaveText(chain.agent);
+      // Cả chuỗi cha hiển thị phải là chuỗi đã chọn (không chỉ agent): server trả success nhưng lưu / hiển thị sai house / master agent sẽ lộ ra ở đây
+      await expect(cellAt(page, 0, COL.masterAgent)).toHaveText(norm(chain.master));
+      await expect(cellAt(page, 0, COL.house)).toHaveText(norm(chain.house));
       qa = { id: Number(await cellAt(page, 0, COL.id).innerText()), name, code, chain };
     });
 
