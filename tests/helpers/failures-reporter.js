@@ -258,7 +258,37 @@ function stepsOf(result) {
     if (last && last.text === x.text) return; // bỏ trùng liên tiếp
     kept.push({ text: x.text, failed: i === lastErr, check: isCheck(x.text) });
   });
-  return kept.slice(-MAX_STEPS);
+  return collapseRepeats(kept).slice(-MAX_STEPS);
+}
+
+// Test lặp cùng một cụm thao tác cho từng bản ghi (vd mở từng master agent: "Truy cập màn hình" + "Bấm vào dòng đầu tiên" x8).
+// Giữ 1 lần cụm đó rồi ghi chú số lần lặp, thay vì liệt kê lại từng lần. Bước lỗi (cuối cùng) luôn được giữ nguyên.
+function collapseRepeats(steps) {
+  const out = [];
+  let i = 0;
+  while (i < steps.length) {
+    let done = false;
+    for (let k = 1; k <= 4 && !done; k++) {
+      let n = 1;
+      while (i + (n + 1) * k <= steps.length && sameBlock(steps, i, i + n * k, k)) n++;
+      if (n >= 2) {
+        out.push(...steps.slice(i, i + k));
+        const what = k === 1 ? "bước trên" : `${k} bước trên`;
+        out.push({ text: `Lặp lại ${what} thêm ${n - 1} lần (cho các bản ghi tiếp theo)`, failed: false, check: true });
+        i += n * k;
+        done = true;
+      }
+    }
+    if (!done) out.push(steps[i++]);
+  }
+  return out;
+}
+
+function sameBlock(steps, a, b, k) {
+  for (let j = 0; j < k; j++) {
+    if (steps[a + j].failed || steps[b + j].failed || steps[a + j].text !== steps[b + j].text) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

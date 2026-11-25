@@ -378,6 +378,7 @@ test.describe("House > House Roles", () => {
     // Kiểm tra CHÉO (chỉ đọc): house hiển thị của mỗi role phải là house có sasEntityId = entityId của role (role/listhierarchy dùng entityId).
     // Bắt được lỗi server lưu / hiển thị sai house (vd gán house mặc định) dù API ghi trả success. Quét tối đa 200 role.
     test("Mọi role: House hiển thị khớp house theo entityId của role", async ({ page }) => {
+      test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
       const houseBySas = bySasEntityId((await captureFullList(page, "/house/list", "/house/entity")).data.list);
       const list = (await captureFullList(page, "/role/listhierarchy", URL)).data.list;
       test.skip(list.length === 0, "Không có dữ liệu");

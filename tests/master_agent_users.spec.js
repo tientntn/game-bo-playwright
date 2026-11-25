@@ -496,6 +496,7 @@ test.describe("Master Agent > Users", () => {
     // Kiểm tra CHÉO (chỉ đọc): master agent hiển thị của mỗi user phải là master agent có sasEntityId = sasEntityId của user, và house hiển thị
     // phải là house CỦA master agent đó (theo masteragent/list). Bắt được lỗi server lưu / hiển thị sai cha (vd gán house mặc định). Quét tối đa 200 user.
     test("Mọi user: Master Agent và House hiển thị khớp master agent theo sasEntityId của user", async ({ page }) => {
+      test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
       const maBySas = bySasEntityId((await captureFullList(page, "/masteragent/list", "/master-agent/entity")).data.list);
       const list = (await captureFullList(page, "/user/listhierarchy", URL)).data.list;
       test.skip(list.length === 0, "Không có dữ liệu");

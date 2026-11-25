@@ -1319,6 +1319,7 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
   // Kiểm tra CHÉO (chỉ đọc): master agent và house của mỗi agent (danh sách, View) phải khớp master agent có sasEntityId = parentSasEntityId
   // và house của master agent đó. Bắt được lỗi server lưu / hiển thị sai quan hệ dù API ghi trả success.
   test("Mọi agent ở trang đầu: Master Agent và House hiển thị (danh sách, View) khớp theo parentSasEntityId", async ({ page }) => {
+    test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
     const mas = (await captureFullList(page, "/masteragent/list", "/master-agent/entity")).data.list;
     const maBySas = new Map(mas.map((m) => [String(m.sasEntityId), m]));
     const listPromise = page.waitForResponse(isList, { timeout: 60000 });

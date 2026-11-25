@@ -441,6 +441,7 @@ test.describe("House > House Users", () => {
     // Kiểm tra CHÉO (chỉ đọc): house hiển thị của mỗi user phải là house có sasEntityId = sasEntityId của user.
     // Bắt được lỗi server lưu / hiển thị sai house (vd gán house mặc định) dù API ghi trả success. Quét tối đa 200 user.
     test("Mọi user: House hiển thị khớp house theo sasEntityId của user", async ({ page }) => {
+      test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
       const houseBySas = bySasEntityId((await captureFullList(page, "/house/list", "/house/entity")).data.list);
       const list = (await captureFullList(page, "/user/listhierarchy", URL)).data.list;
       test.skip(list.length === 0, "Không có dữ liệu");

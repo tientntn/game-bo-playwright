@@ -441,6 +441,7 @@ test.describe("Agent > Agent Roles", () => {
     // Kiểm tra CHÉO (chỉ đọc): agent hiển thị của mỗi role phải là agent có sasEntityId = entityId của role, còn master agent và house hiển thị phải là
     // master agent và house CỦA agent đó (theo agent/list). Bắt được lỗi server lưu / hiển thị sai cha. Quét tối đa 200 role.
     test("Mọi role: Agent, Master Agent và House hiển thị khớp agent theo entityId của role", async ({ page }) => {
+      test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
       const agentBySas = bySasEntityId((await captureFullList(page, "/agent/list", "/agent/entity")).data.list);
       const list = (await captureFullList(page, "/role/listhierarchy", URL)).data.list;
       test.skip(list.length === 0, "Không có dữ liệu");

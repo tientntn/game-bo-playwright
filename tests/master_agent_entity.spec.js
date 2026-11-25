@@ -1219,6 +1219,7 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
   // Kiểm tra CHÉO (chỉ đọc): house của mỗi master agent hiển thị ở danh sách và màn hình View phải là house có sasEntityId = parentSasEntityId.
   // Bắt được lỗi server trả success khi tạo nhưng lưu / hiển thị sai house (vd gán house mặc định) trên MỌI bản ghi, không riêng bản ghi test tạo.
   test("Mọi master agent ở trang đầu: House hiển thị (danh sách, View) khớp house theo parentSasEntityId", async ({ page }) => {
+    test.setTimeout(240000); // vài lần mở màn hình + tải danh sách trước khi tới bước lặp; staging chậm thì 30s mặc định không đủ
     const houses = (await captureJson(page, "/dropdown/house", "/house/entity")).data;
     const houseBySas = new Map(houses.map((h) => [String(h.sasEntityId), { id: h.value, code: h.code }]));
     const listPromise = page.waitForResponse(isList, { timeout: 60000 });
