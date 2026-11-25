@@ -521,7 +521,8 @@ class FailuresReporter {
       L.push("");
     }
 
-    if (this.failures.length) this.renderRerun(L);
+    if (this.failures.length) this.renderRerun(L, this.failures, "Chạy lại tất cả test lỗi", "Sau khi chạy xong, file này được tạo lại và chỉ còn các test vẫn lỗi.");
+    if (this.flaky.length) this.renderRerun(L, this.flaky, "Chạy lại các test chập chờn", "Dùng để kiểm tra xem lỗi có lặp lại không; nếu fail thì chi tiết lỗi sẽ được ghi vào file này.");
 
     try {
       fs.mkdirSync(baseDir, { recursive: true });
@@ -534,16 +535,16 @@ class FailuresReporter {
 
   // Cuối file: lệnh chạy lại TẤT CẢ test lỗi (UI và API dùng script npm khác nhau).
   // Chọn test theo "file:dòng" thay vì -g "tên test" vì tên test có dấu nháy / ngoặc / % làm hỏng lệnh trong shell.
-  renderRerun(L) {
+  renderRerun(L, items, title, hint) {
     const groups = { ui: { script: "test:ui", refs: new Set() }, api: { script: "test:api", refs: new Set() } };
-    for (const { test } of this.failures) {
+    for (const { test } of items) {
       const project = test.parent?.project?.()?.name || test.titlePath()[1] || "";
       groups[project === "api" ? "api" : "ui"].refs.add(`${rel(test.location.file)}:${test.location.line}`);
     }
 
-    L.push("## Chạy lại tất cả test lỗi");
+    L.push(`## ${title}`);
     L.push("");
-    L.push("Chạy từ thư mục gốc của project. Sau khi chạy xong, file này được tạo lại và chỉ còn các test vẫn lỗi.");
+    L.push(`Chạy từ thư mục gốc của project. ${hint}`);
     L.push("");
     for (const g of Object.values(groups)) {
       if (!g.refs.size) continue;
