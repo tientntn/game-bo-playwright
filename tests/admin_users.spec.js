@@ -962,30 +962,32 @@ test.describe("Administration > Users", () => {
       for (const [column, sortBy] of Object.entries(SORTABLE)) {
         test(`Sort cột ${column}: tăng dần -> giảm dần -> về mặc định (id giảm dần)`, async ({ page }) => {
           test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu để kiểm tra thứ tự");
-          // Cột chữ phụ thuộc collation của server nên chỉ kiểm tra request; cột Status là 0 / 1 nên kiểm tra được thứ tự
+          // Cột chữ phụ thuộc collation của server nên chỉ kiểm tra request; cột Status chỉ có 2 giá trị nên kiểm tra được thứ tự.
+          // Server sắp Status asc theo thứ tự "Active" rồi "Inactive" (desc thì ngược lại), KHÔNG phải thứ tự số 0 -> 1 -> test không gán cứng chiều:
+          // mỗi lần bấm bảng phải xếp theo MỘT chiều (không xen kẽ) và asc / desc phải cho 2 chiều ngược nhau.
           const key = (v) => (v === "Active" ? 1 : 0);
           const checkOrder = column === "Status";
+          const isSorted = (v) => [asc, (a, b) => b - a].some((cmp) => JSON.stringify(v) === JSON.stringify([...v].sort(cmp)));
+          const statusKeys = async () => (await columnValues(page, column)).map(key);
+          const before = checkOrder ? await statusKeys() : [];
+          let upKeys = [];
 
           const up = await reloadBy(page, () => th(page, column).click());
           expect(up).toMatchObject({ sortBy, sortDirection: "asc", page: 1, pageSize: 10 });
           if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort(asc));
-              }, { message: "thứ tự tăng dần" })
-              .toBe(true);
+            await expect.poll(async () => isSorted(await statusKeys()), { message: "sort tăng dần: các dòng phải xếp theo một chiều" }).toBe(true);
+            upKeys = await statusKeys();
           }
 
           const down = await reloadBy(page, () => th(page, column).click());
           expect(down).toMatchObject({ sortBy, sortDirection: "desc" });
           if (checkOrder) {
-            await expect
-              .poll(async () => {
-                const v = (await columnValues(page, column)).map(key);
-                return JSON.stringify(v) === JSON.stringify([...v].sort((a, b) => b - a));
-              }, { message: "thứ tự giảm dần" })
-              .toBe(true);
+            await expect.poll(async () => isSorted(await statusKeys()), { message: "sort giảm dần: các dòng phải xếp theo một chiều" }).toBe(true);
+            const downKeys = await statusKeys();
+            // Dữ liệu có cả Active lẫn Inactive thì dòng đầu của asc và desc phải khác nhau (2 chiều ngược nhau)
+            if (new Set([...before, ...upKeys, ...downKeys]).size > 1) {
+              expect(downKeys[0], `dòng đầu khi giảm dần (${downKeys}) phải khác khi tăng dần (${upKeys})`).not.toBe(upKeys[0]);
+            }
           }
 
           const none = await reloadBy(page, () => th(page, column).click());
