@@ -380,7 +380,8 @@ test.describe("Report > Promotion Summary", () => {
         const a = list[i];
         const at = `dòng ${i + 1} (${a.promoCode})`;
         expect(r["Promo Code"], at).toBe(a.promoCode);
-        expect(r["Promo Name"], at).toBe(a.promoName);
+        // Bảng đã trim() từng ô; API có thể trả tên kèm khoảng trắng cuối (vd "count1 ") nên so sánh với bản đã trim
+        expect(r["Promo Name"], at).toBe(a.promoName.trim());
         expect(r["Operators"], at).toBe(a.operators);
         expect(r["Game Type"], at).toBe(a.gameType);
         expect(r["Free Game Type"], at).toBe(a.freeGameType);
@@ -490,7 +491,7 @@ test.describe("Report > Promotion Summary", () => {
         "Rules",
       ]);
       expect(info["Promo Code"]).toBe(a.promoCode);
-      expect(info["Promo Name"]).toBe(a.promoName);
+      expect(info["Promo Name"]).toBe(a.promoName.trim()); // API có thể trả tên kèm khoảng trắng cuối
       expect(info["Game Type"]).toBe(a.gameType);
       expect(info["Currency"]).toBe(a.currency);
       expect(bulletsToNames(info["Game Names"])).toBe(a.gameName);

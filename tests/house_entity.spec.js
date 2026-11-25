@@ -1165,14 +1165,26 @@ test.describe("Houses > View / Update / Create (không ghi dữ liệu thật)",
   });
 
   // Mở danh sách rồi bấm icon ở dòng đầu để vào màn hình con (id lấy từ dòng, không hard-code). Trả về house của dòng đầu + response house/view.
-  async function openChild(page, iconIndex) {
+  // complete = true: chọn dòng ĐẦU TIÊN có đủ Backoffice URL, Currency và Game Category thay vì cố định dòng 0.
+  // Dùng cho các test Update đi qua bước Next / Submit: bản ghi QA dở dang (không Currency / Backoffice URL) nằm đầu danh sách
+  // làm form Update báo "Please select at least 1 currencies" nên không sang được bước 2.
+  // Ngoài ra mọi category của dòng phải có trong dropdown/gamecategory: category không có trong dropdown (vd đã ngừng dùng) được ô chọn
+  // hiển thị bằng id số thay vì tên nên không so sánh với tên được.
+  async function openChild(page, iconIndex, { complete = false } = {}) {
     const listPromise = page.waitForResponse(isList, { timeout: 60000 });
     listPromise.catch(() => {});
+    const categoriesPromise = complete ? page.waitForResponse(isCategoryDropdown, { timeout: 60000 }) : null;
+    categoriesPromise?.catch(() => {});
     await openPage(page);
     const json = await (await listPromise).json();
     test.skip(json.data.list.length === 0, "Không có dữ liệu");
-    const x = json.data.list[0];
-    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, 0, iconIndex).click()]);
+    const categoryNames = complete ? new Set((await (await categoriesPromise).json()).data.map((c) => c.label)) : null;
+    const row = complete
+      ? json.data.list.findIndex((r) => r.backofficeUrl && r.currencies?.length && r.gameCategories?.length && r.gameCategories.every((n) => categoryNames.has(n)))
+      : 0;
+    test.skip(row < 0, "Không có bản ghi nào đủ Backoffice URL, Currency và Game Category");
+    const x = json.data.list[row];
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, row, iconIndex).click()]);
     return { x, view: (await viewRes.json()).data };
   }
 
@@ -1226,7 +1238,7 @@ test.describe("Houses > View / Update / Create (không ghi dữ liệu thật)",
     });
 
     test("Form hiển thị đúng dữ liệu house (tên, code, Backoffice URL, status, currency, category)", async ({ page }) => {
-      const { x, view } = await openChild(page, 1);
+      const { x, view } = await openChild(page, 1, { complete: true });
       await expect(nameInput(page)).toHaveValue(x.name);
       await expect(page.locator("#entityCode")).toHaveValue(x.code);
       await expect(page.locator("#subDomain")).toHaveValue(x.backofficeUrl);
@@ -1256,7 +1268,7 @@ test.describe("Houses > View / Update / Create (không ghi dữ liệu thật)",
     });
 
     test("Đi qua 3 bước bằng Next / Previous, bước Review hiển thị dữ liệu rồi Cancel về danh sách", async ({ page }) => {
-      const { x } = await openChild(page, 1);
+      const { x } = await openChild(page, 1, { complete: true });
       await goNext(page, STEP2);
       await expect(page.getByText("Geofencing Settings")).toBeVisible();
       await goNext(page, STEP3);
@@ -1272,7 +1284,7 @@ test.describe("Houses > View / Update / Create (không ghi dữ liệu thật)",
     });
 
     test("Submit ở bước Review (response GIẢ): gửi house/update đúng dữ liệu hiện có rồi quay về danh sách", async ({ page }) => {
-      const { x, view } = await openChild(page, 1);
+      const { x, view } = await openChild(page, 1, { complete: true });
       await mockWrites(page, MOCK_OK);
       await goNext(page, STEP2);
       await goNext(page, STEP3);

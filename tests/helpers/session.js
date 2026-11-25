@@ -49,4 +49,21 @@ function buildStorageState({ domain = process.env.BO_DOMAIN || "dev-bo.royaledge
   };
 }
 
-module.exports = { readSessionEntries, slimSessionEntries, buildStorageState, SESSION_FILE };
+// Tiền tố key localStorage của app theo môi trường: dev-bo -> "DEV" (DEV-ctoken, DEV-appLang...), staging-bo -> "STAGING".
+// Thứ tự: BO_STORAGE_PREFIX trong .env -> suy ra từ key "<PREFIX>-ctoken" trong session.txt (cùng môi trường với BO_DOMAIN)
+// -> suy ra từ BO_DOMAIN ("staging-bo.xxx" -> "STAGING") -> "DEV".
+function appStoragePrefix() {
+  if (process.env.BO_STORAGE_PREFIX) return process.env.BO_STORAGE_PREFIX;
+  try {
+    for (const { name } of readSessionEntries()) {
+      const m = /^(.+)-ctoken$/.exec(name);
+      if (m) return m[1];
+    }
+  } catch {
+    // không có session.txt -> thử suy ra từ domain bên dưới
+  }
+  const sub = (process.env.BO_DOMAIN || "dev-bo.royaledge.io").split(".")[0].replace(/-bo$/i, "");
+  return (sub || "dev").toUpperCase();
+}
+
+module.exports = { readSessionEntries, slimSessionEntries, buildStorageState, appStoragePrefix, SESSION_FILE };

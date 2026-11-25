@@ -1199,14 +1199,19 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
   });
 
   // Mở danh sách rồi bấm icon ở dòng đầu để vào màn hình con (id lấy từ dòng, không hard-code). Trả về MA của dòng đầu + response masteragent/view.
-  async function openChild(page, iconIndex) {
+  // complete = true: chọn dòng ĐẦU TIÊN có đủ Backoffice URL, Currency và Game Category thay vì cố định dòng 0.
+  // Dùng cho các test Update đi qua bước Next / Submit: bản ghi QA dở dang (không Currency / Backoffice URL) nằm đầu danh sách
+  // làm form Update báo "Please select at least 1 currencies" nên không sang được bước 2.
+  async function openChild(page, iconIndex, { complete = false } = {}) {
     const listPromise = page.waitForResponse(isList, { timeout: 60000 });
     listPromise.catch(() => {});
     await openPage(page);
     const json = await (await listPromise).json();
     test.skip(json.data.list.length === 0, "Không có dữ liệu");
-    const x = json.data.list[0];
-    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, 0, iconIndex).click()]);
+    const row = complete ? json.data.list.findIndex((r) => r.backofficeUrl && r.currencies?.length && r.gameCategories?.length) : 0;
+    test.skip(row < 0, "Không có bản ghi nào đủ Backoffice URL, Currency và Game Category");
+    const x = json.data.list[row];
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, row, iconIndex).click()]);
     return { x, view: (await viewRes.json()).data };
   }
 
@@ -1261,7 +1266,7 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
     });
 
     test("Form hiển thị đúng dữ liệu master agent (house, tên, code, Backoffice URL, timezone, status)", async ({ page }) => {
-      const { x, view } = await openChild(page, 1);
+      const { x, view } = await openChild(page, 1, { complete: true });
       await expect(nameInput(page)).toHaveValue(x.name);
       await expect(page.locator("#entityCode")).toHaveValue(x.code);
       await expect(page.locator("#subDomain")).toHaveValue(x.backofficeUrl);
@@ -1288,7 +1293,7 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
     });
 
     test("Đi qua 3 bước bằng Next / Previous, bước Review hiển thị dữ liệu rồi Cancel về danh sách", async ({ page }) => {
-      const { x, view } = await openChild(page, 1);
+      const { x, view } = await openChild(page, 1, { complete: true });
       await nextBtn(page).click();
       await expect(page.getByText("Geofencing Settings")).toBeVisible();
       expect(await stepClasses(page)).toEqual(["finish", "process", "wait"]);
@@ -1297,7 +1302,8 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
       await expect(descValue(page, "Master Agent Name")).toHaveText(norm(x.name));
       await expect(descValue(page, "Master Agent Code")).toHaveText(norm(x.code));
       await expect(descValue(page, "Status")).toHaveText(statusOf(x));
-      const cur = words(await descValue(page, "Currency").innerText());
+      // Mỗi currency là 1 phần tử riêng, không có khoảng trắng giữa các chip (innerText cả ô dính nhau "AFNAMD") -> đọc từng phần tử lá
+      const cur = (await descValue(page, "Currency").locator("*:not(:has(*))").allInnerTexts()).map(norm).filter(Boolean);
       expect([...cur].sort()).toEqual(view.currencies.map((c) => c.code).sort());
       await expect(submitBtn(page)).toBeVisible(); // KHÔNG bấm Submit thật
       await prevBtn(page).click();
@@ -1309,7 +1315,7 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
     });
 
     test("Submit ở bước Review (response GIẢ): gửi masteragent/update đúng dữ liệu hiện có rồi quay về danh sách", async ({ page }) => {
-      const { x, view } = await openChild(page, 1);
+      const { x, view } = await openChild(page, 1, { complete: true });
       await mockWrites(page, MOCK_OK);
       await nextBtn(page).click();
       await nextBtn(page).click();

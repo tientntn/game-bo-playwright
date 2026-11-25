@@ -481,7 +481,9 @@ test.describe("Administration > Audit Logs", () => {
         // -> so sánh bỏ qua khoảng trắng
         expect(c[COL.module].replace(/\s+/g, ""), at).toBe(norm(x.module).replace(/\s+/g, ""));
         expect(c[COL.entity].replace(/\s+/g, ""), at).toBe(norm(x.entity).replace(/\s+/g, ""));
-        expect(c[COL.appliedTo], at).toBe(norm(x.appliedTo));
+        // Hành vi FE: cột Applied To cũng đi qua hàm dịch (t(appliedTo)) như Module / Entity, nên giá trị trùng translation key bị đổi hoa / thường:
+        // vd code currency "ADD" (API) hiển thị "Add" -> so sánh không phân biệt hoa thường
+        expect(c[COL.appliedTo].toLowerCase(), at).toBe(norm(x.appliedTo).toLowerCase());
         expect(c[COL.ip], at).toBe(norm(x.ip));
       }
     });

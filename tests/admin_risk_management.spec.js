@@ -817,7 +817,8 @@ test.describe("Administration > Risk Management", () => {
         const first = (await search(page)).json.data.list[0];
         const sev = sevLabel(first.severity);
         const st = first.status === 1 ? "Active" : "Inactive";
-        const part = norm(first.name).slice(0, 8);
+        // trim(): cắt 8 ký tự có thể kết thúc bằng dấu cách (vd "QA Rule "), app trim giá trị gõ trước khi gửi nên filters.name không có dấu cách cuối
+        const part = norm(first.name).slice(0, 8).trim();
         await typeFilter(page, "name", part);
         await selectOption(page, "severity", sev);
         await selectOption(page, "status", st);

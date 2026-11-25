@@ -30,7 +30,7 @@
 //  5. Mã ngôn ngữ không được đặt vào <html lang> (luôn "en").
 //  6. Khi ô New Password đang focus, khung "Password Requirements" che nút Cancel / Save Changes -> test bấm tiêu đề để bỏ focus trước.
 const { test, expect } = require("@playwright/test");
-const { buildStorageState } = require("./helpers/session");
+const { buildStorageState, appStoragePrefix } = require("./helpers/session");
 
 test.use({
   viewport: { width: 1920, height: 1080 },
@@ -40,7 +40,12 @@ test.use({
 
 // Màn hình nền để mở menu (nhẹ hơn Dashboard); menu user có ở mọi màn hình sau khi đăng nhập
 const BASE_PAGE = "/download-history";
-const LANG_KEY = "DEV-appLang";
+// Tiền tố key localStorage đổi theo môi trường (dev-bo: "DEV-", staging-bo: "STAGING-") nên KHÔNG gán cứng "DEV-" (xem appStoragePrefix trong helpers/session.js).
+// Tên test vẫn ghi "DEV-appLang" / "DEV-*" để giữ nguyên khoá lịch sử trong test-history/; ý nghĩa thực tế là "<tiền tố môi trường>-appLang" / "<tiền tố>-*".
+const PREFIX = appStoragePrefix();
+const KEY_RE = new RegExp("^" + PREFIX + "-");
+const LOGIN_KEY_RE = new RegExp("^" + PREFIX + "-|^region$");
+const LANG_KEY = `${PREFIX}-appLang`;
 
 // Chuỗi hiển thị theo từng ngôn ngữ (đọc từ màn hình thật; tên ngôn ngữ trong submenu luôn giữ nguyên ở mọi ngôn ngữ)
 const LANGS = [
@@ -589,12 +594,12 @@ test.describe("Đổi ngôn ngữ (Languages)", () => {
 
   test("Đổi ngôn ngữ không làm mất đăng nhập: token trong localStorage còn nguyên, không bị chuyển về /login", async ({ page }) => {
     await openPage(page);
-    const before = (await localKeys(page)).filter((k) => /^DEV-/.test(k) && k !== LANG_KEY).sort();
+    const before = (await localKeys(page)).filter((k) => KEY_RE.test(k) && k !== LANG_KEY).sort();
     expect(before.length).toBeGreaterThan(0);
     try {
       await selectLanguage(page, "vi");
       await expectLanguage(page, VI);
-      const after = (await localKeys(page)).filter((k) => /^DEV-/.test(k) && k !== LANG_KEY).sort();
+      const after = (await localKeys(page)).filter((k) => KEY_RE.test(k) && k !== LANG_KEY).sort();
       expect(after).toEqual(before);
       expect(page.url()).not.toMatch(/\/login/);
     } finally {
@@ -859,7 +864,7 @@ test.describe("Change Password - Save (response GIẢ, không tới server)", ()
     await openPage(page);
     allowedWrites.push("user/change-password");
     await mockWrite(page, "/user/change-password", FAKE_SUCCESS);
-    const keysBefore = (await localKeys(page)).filter((k) => /^DEV-/.test(k)).sort();
+    const keysBefore = (await localKeys(page)).filter((k) => KEY_RE.test(k)).sort();
     await openChangePassword(page);
     await fillCp(page, { old: FAKE_OLD, pw: FAKE_NEW, confirm: FAKE_NEW });
     const [req] = await Promise.all([page.waitForRequest(isChangePassword), cpSave(page).click()]);
@@ -869,7 +874,7 @@ test.describe("Change Password - Save (response GIẢ, không tới server)", ()
     await expect(cpModal(page)).toBeHidden();
     // Không bị đăng xuất: vẫn ở trang, token còn nguyên
     expect(page.url()).not.toMatch(/\/login/);
-    expect((await localKeys(page)).filter((k) => /^DEV-/.test(k)).sort()).toEqual(keysBefore);
+    expect((await localKeys(page)).filter((k) => KEY_RE.test(k)).sort()).toEqual(keysBefore);
     expect(writes.map((w) => w.url)).toEqual(["user/change-password"]); // đúng 1 request
   });
 
@@ -1050,19 +1055,19 @@ test.describe("Logout - xác nhận (response GIẢ)", () => {
     allowedWrites.push("auth/logout");
     await mockWrite(page, "/auth/logout", FAKE_SUCCESS);
     const before = await localKeys(page);
-    const loginKeys = before.filter((k) => /^DEV-|^region$/.test(k));
-    expect(loginKeys).toContain("DEV-ctoken");
-    expect(loginKeys).toContain("DEV-rtoken");
+    const loginKeys = before.filter((k) => LOGIN_KEY_RE.test(k));
+    expect(loginKeys).toContain(`${PREFIX}-ctoken`);
+    expect(loginKeys).toContain(`${PREFIX}-rtoken`);
     expect(before).toContain("device-unique-signature");
     await openLogoutDialog(page);
     await Promise.all([page.waitForRequest(isLogout), logoutConfirm(page).click()]);
     await page.waitForURL(/\/login/);
-    await expect.poll(async () => (await localKeys(page)).filter((k) => /^DEV-|^region$/.test(k))).toEqual([]);
+    await expect.poll(async () => (await localKeys(page)).filter((k) => LOGIN_KEY_RE.test(k))).toEqual([]);
     const after = await localKeys(page);
     expect(after).toContain("device-unique-signature"); // định danh thiết bị được giữ lại
     // Các key không thuộc đăng nhập (vd sorter__*) không bị xoá
     expect(after.filter((k) => !before.includes(k))).toEqual([]);
-    for (const k of before.filter((x) => !/^DEV-|^region$/.test(x))) expect(after, `Key ${k} không được bị xoá`).toContain(k);
+    for (const k of before.filter((x) => !LOGIN_KEY_RE.test(x))) expect(after, `Key ${k} không được bị xoá`).toContain(k);
     expect(await context.cookies()).toEqual([]);
   });
 
@@ -1115,7 +1120,7 @@ test.describe("Logout - xác nhận (response GIẢ)", () => {
     await Promise.all([page.waitForRequest(isLogout), logoutConfirm(page).click()]);
     // Ghi nhận hành vi HIỆN TẠI (không assert hành vi mong đợi)
     await page.waitForURL(/\/login/);
-    await expect.poll(async () => (await localKeys(page)).filter((k) => /^DEV-/.test(k))).toEqual([]);
+    await expect.poll(async () => (await localKeys(page)).filter((k) => KEY_RE.test(k))).toEqual([]);
     expect(await logoutDialog(page).count()).toBe(0);
   });
 
@@ -1144,7 +1149,7 @@ test.describe("Logout - xác nhận (response GIẢ)", () => {
       await Promise.all([page.waitForRequest(isLogout), logoutConfirm(page).click()]);
       await page.waitForURL(/\/login/);
       // Ghi nhận hành vi HIỆN TẠI: mọi key DEV-* kể cả DEV-appLang bị xoá
-      await expect.poll(async () => (await localKeys(page)).filter((k) => /^DEV-/.test(k))).toEqual([]);
+      await expect.poll(async () => (await localKeys(page)).filter((k) => KEY_RE.test(k))).toEqual([]);
       expect(await localKeys(page)).not.toContain(LANG_KEY);
     } finally {
       // Đã ở /login với localStorage của context riêng của test này: không cần (và không thể) khôi phục bằng menu

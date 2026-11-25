@@ -798,7 +798,9 @@ test.describe("Agents > Agents (danh sách)", () => {
       const { json } = await search(page);
       test.skip(json.data.totalCount <= 10, "Chỉ có 1 trang");
       await selectFilter(page, "status", "Inactive");
-      await search(page);
+      const filtered = await search(page);
+      // Phải còn > 10 bản ghi SAU KHI lọc Inactive mới có trang 2 (tổng chưa lọc > 10 chưa đủ)
+      test.skip(filtered.json.data.totalCount <= 10, "Sau khi lọc Inactive chỉ có 1 trang");
       await reloadBy(page, () => page.locator(".ant-pagination-item-2").click());
       const bodies = await resetBodies(page);
       expect(bodies.at(-1), `các request list sau Reset: ${JSON.stringify(bodies)}`).toMatchObject({ page: 2, filters: F() });
