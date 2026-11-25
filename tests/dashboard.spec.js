@@ -125,14 +125,21 @@ async function gotoAndWait(page, url, firstLoad) {
 // ---------------------------------------------------------------------------
 // Mở Dashboard, chờ 3 API chart. Trả về { topGames, ggrTrend, topCurrencies } = { body, json } của lần load đầu.
 async function openDashboard(page) {
-  const wait = (api) =>
-    page.waitForResponse(api).then(async (res) => ({
-      body: JSON.parse(res.request().postData() || "{}"),
-      json: await res.json(),
-    }));
-  const topGames = wait(isTopGames);
-  const ggrTrend = wait(isGgrTrend);
-  const topCurrencies = wait(isTopCurrencies);
+  // Backend thỉnh thoảng trả lỗi (UI hiện toast "Something went wrong", chart trống): báo rõ API nào lỗi thay vì
+  // để test chết với "Cannot read properties of undefined (reading 'map')"
+  const wait = (name, api) =>
+    page.waitForResponse(api).then(async (res) => {
+      const json = await res.json().catch(() => null);
+      if (!res.ok() || !json || json.status !== "success" || !Array.isArray(json.data)) {
+        throw new Error(
+          `API ${name} lỗi: HTTP ${res.status()}, response = ${JSON.stringify(json)?.slice(0, 300)} (UI hiện "Something went wrong", chart trống)`,
+        );
+      }
+      return { body: JSON.parse(res.request().postData() || "{}"), json };
+    });
+  const topGames = wait("Top 10 Games", isTopGames);
+  const ggrTrend = wait("GGR trend", isGgrTrend);
+  const topCurrencies = wait("Top 10 GGR by Currencies", isTopCurrencies);
   for (const p of [topGames, ggrTrend, topCurrencies]) p.catch(() => {});
 
   await gotoAndWait(page, DASHBOARD_URL, Promise.all([topGames, ggrTrend, topCurrencies]));
