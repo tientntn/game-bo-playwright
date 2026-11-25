@@ -31,6 +31,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
+const { expectPersisted, relationMismatches, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1561,6 +1562,24 @@ test.describe("Houses > Create House (ghi dữ liệu thật)", () => {
     await expect(cellAt(page, 0, COL.status)).toHaveText("Active");
     expect(await chipsOf(page, 0, COL.currency)).toEqual([currency]);
     expect(await chipsOf(page, 0, COL.category)).toEqual([category]);
+
+    // ĐỌC LẠI từ server (house/view) và so từng trường với dữ liệu đã gửi / đã chọn
+    const sent = bodyOf(req);
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, 0, 0).click()]);
+    const stored = (await viewRes.json()).data;
+    expectPersisted(
+      [
+        ["name", sent.name, stored.name],
+        ["entityCode ↔ code", sent.entityCode, stored.code],
+        ["status", sent.status, stored.status],
+        ["timezoneId ↔ timezone.id", sent.timezoneId, stored.timezone && stored.timezone.id],
+        ["currency đã chọn ↔ currencies", [currency], (stored.currencies || []).map((c) => c.code)],
+        ["game category đã chọn ↔ gameCategoryList", [category], (stored.gameCategoryList || []).map((c) => c.name)],
+      ],
+      "House server lưu khác dữ liệu đã gửi khi tạo (house/create trả success)",
+    );
+    await page.goto(URL);
+    await expect(table(page).locator("tbody tr.ant-table-row").first()).toContainText(name);
 
     // Dọn: Deactivate house QA-AUTO vừa tạo (ghi thật nhưng chỉ lên house do test tạo)
     await openRowMenu(page, 0);

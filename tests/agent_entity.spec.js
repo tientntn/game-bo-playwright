@@ -35,6 +35,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
+const { expectPersisted, relationMismatches, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1315,6 +1316,33 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
     return { x, view: (await viewRes.json()).data };
   }
 
+  // Kiểm tra CHÉO (chỉ đọc): master agent và house của mỗi agent (danh sách, View) phải khớp master agent có sasEntityId = parentSasEntityId
+  // và house của master agent đó. Bắt được lỗi server lưu / hiển thị sai quan hệ dù API ghi trả success.
+  test("Mọi agent ở trang đầu: Master Agent và House hiển thị (danh sách, View) khớp theo parentSasEntityId", async ({ page }) => {
+    const mas = (await captureFullList(page, "/masteragent/list", "/master-agent/entity")).data.list;
+    const maBySas = new Map(mas.map((m) => [String(m.sasEntityId), m]));
+    const listPromise = page.waitForResponse(isList, { timeout: 60000 });
+    listPromise.catch(() => {});
+    await openPage(page);
+    const list = (await (await listPromise).json()).data.list;
+    test.skip(list.length === 0, "Không có dữ liệu");
+    test.setTimeout(240000);
+    const maRows = [];
+    const houseRows = [];
+    for (const [i, x] of list.entries()) {
+      if (i > 0) await Promise.all([page.waitForResponse(isList, { timeout: 60000 }), page.goto(URL)]);
+      const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, i, 0).click()]);
+      const view = (await viewRes.json()).data;
+      const ma = maBySas.get(String(view.parentSasEntityId));
+      const label = `Agent id ${x.id} "${x.name}"`;
+      const why = `parentSasEntityId = ${view.parentSasEntityId}`;
+      maRows.push({ label, why, expected: ma, shown: [["cột Master Agent của danh sách", x.masterAgent], ["màn hình View", view.masterAgent]] });
+      houseRows.push({ label, why: `${why} (house của master agent đó)`, expected: ma && ma.house, shown: [["cột House của danh sách", x.house], ["màn hình View", view.house]] });
+    }
+    const bad = [...relationMismatches("master agent", maRows), ...relationMismatches("house", houseRows)];
+    expect(bad, `${bad.length} sai lệch quan hệ master agent / house của agent`).toEqual([]);
+  });
+
   // ===== View =====
   test.describe("View Agent", () => {
     test("Có tiêu đề 'Agent Details', 2 mục Basic Information / Backoffice Geofencing và bảng IP Address / Country / Remark", async ({ page }) => {
@@ -1783,16 +1811,18 @@ test.describe("Agents > Create Agent (ghi dữ liệu thật)", () => {
       page.locator(".ant-form-item").filter({ has: page.locator(".ant-form-item-label label", { hasText: exact(label) }) }).first();
     const heading = page.getByText("Create Agent", { exact: true });
     await page.goto("/agent/entity/create");
-    // House: option đầu tiên của dropdown; Master Agent: option đầu tiên sau khi chọn house
+    // House: option THỨ HAI (không phải option đầu = house mặc định); Master Agent: option thứ hai nếu house có từ 2 master agent, ngược lại option duy nhất
     await field("House Name").locator(".ant-select").first().click();
-    const houseOpt = openOptions(page).first();
-    await houseOpt.waitFor();
+    await openOptions(page).first().waitFor();
+    const houseIdx = pickIndexNotDefault(await openOptions(page).count());
+    test.skip(houseIdx < 0, "Chỉ có 1 house nên không phân biệt được house đã chọn với house mặc định");
+    const houseOpt = openOptions(page).nth(houseIdx);
     const houseTitle = norm(await houseOpt.getAttribute("title"));
     await houseOpt.click();
     await expect(openOptions(page)).toHaveCount(0); // đợi dropdown House đóng hẳn, tránh trúng option House đang mờ dần
     await field("Master Agent Name").locator(".ant-select").first().click();
-    const maOpt = openOptions(page).first();
-    await maOpt.waitFor();
+    await openOptions(page).first().waitFor();
+    const maOpt = openOptions(page).nth(Math.max(0, pickIndexNotDefault(await openOptions(page).count())));
     const maTitle = norm(await maOpt.getAttribute("title"));
     await maOpt.click();
     await expect(openOptions(page)).toHaveCount(0);
@@ -1837,6 +1867,27 @@ test.describe("Agents > Create Agent (ghi dữ liệu thật)", () => {
     await expect(cellAt(page, 0, COL.master)).toHaveText(maTitle);
     expect(await chipsOf(page, 0, COL.currency)).toEqual([currency]);
     expect(await chipsOf(page, 0, COL.category)).toEqual([category]);
+
+    // ĐỌC LẠI từ server (agent/view) và so từng trường với dữ liệu đã gửi / đã chọn
+    const sent = bodyOf(req);
+    const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, 0, 0).click()]);
+    const stored = (await viewRes.json()).data;
+    expectPersisted(
+      [
+        ["name", sent.name, stored.name],
+        ["entityCode ↔ code", sent.entityCode, stored.code],
+        ["status", sent.status, stored.status],
+        ...(sent.parentId !== undefined ? [["parentId ↔ parentSasEntityId", sent.parentId, stored.parentSasEntityId]] : []),
+        ...(sent.masterAgentId !== undefined ? [["masterAgentId ↔ masterAgent.id", sent.masterAgentId, stored.masterAgent && stored.masterAgent.id]] : []),
+        ["house đã chọn (mã) ↔ house.code", houseTitle.split(" - ")[0], stored.house && stored.house.code],
+        ["master agent đã chọn (tên) ↔ masterAgent.name", maTitle, stored.masterAgent && stored.masterAgent.name],
+        ["currency đã chọn ↔ currencies", [currency], (stored.currencies || []).map((c) => c.code)],
+        ["game category đã chọn ↔ gameCategoryList", [category], (stored.gameCategoryList || []).map((c) => c.name)],
+      ],
+      "Agent server lưu khác dữ liệu đã gửi khi tạo (agent/create trả success)",
+    );
+    await page.goto(URL);
+    await expect(table(page).locator("tbody tr.ant-table-row").first()).toContainText(name);
 
     // Dọn: Deactivate agent QA-AUTO vừa tạo (ghi thật nhưng chỉ lên agent do test tạo)
     await openRowMenu(page, 0);
