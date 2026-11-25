@@ -78,13 +78,15 @@ const MODULES = {
   Players: "PLAYERS",
   Reports: "REPORTS",
 };
-// Status: nhãn hiển thị -> { filters.status, status trong response, class của tag }
+// Status: nhãn hiển thị -> { filters.status, các giá trị status có thể có trong response, class của tag }
+// Bản ghi đang xử lý: response trả "IN PROGRESS" (quan sát trên staging, có cả file chưa có fileName / link), bảng vẫn hiển thị "Processing"
+// -> chấp nhận cả "PROCESSING" lẫn "IN PROGRESS".
 const STATUSES = {
-  Completed: { filter: 1, api: "COMPLETED", cls: /tag-success/ },
-  Error: { filter: -1, api: "ABORTED", cls: /tag-error/ },
-  Processing: { filter: 0, api: "PROCESSING", cls: null },
+  Completed: { filter: 1, apis: ["COMPLETED"], cls: /tag-success/ },
+  Error: { filter: -1, apis: ["ABORTED"], cls: /tag-error/ },
+  Processing: { filter: 0, apis: ["PROCESSING", "IN PROGRESS"], cls: null },
 };
-const STATUS_TEXT = { COMPLETED: "Completed", ABORTED: "Error", PROCESSING: "Processing" };
+const STATUS_TEXT = { COMPLETED: "Completed", ABORTED: "Error", PROCESSING: "Processing", "IN PROGRESS": "Processing" };
 // Section hiển thị: bảng ánh xạ cố định của app (không có quy tắc chung: "Report" / "Reports" lẫn lộn, REPORTS_GAME_RECOMMENDATION hiện nguyên enum)
 const SECTION_TEXT = {
   ADMINISTRATION_CURRENCY: "Administration Currency",
@@ -587,7 +589,8 @@ test.describe("Download History", () => {
         test.skip(i < 0, "Không có bản ghi Completed ở trang đầu");
         const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 30000 }), downloadIcon(rowAt(page, i)).click()]);
         expect(dl.suggestedFilename()).toMatch(new RegExp(`^${json.data.list[i].fileName}`));
-        expect(dl.suggestedFilename()).toMatch(/\.csv$/i);
+        // Phần lớn export là .csv nhưng một số loại (vd Bet History) được nén thành .zip -> chấp nhận cả hai
+        expect(dl.suggestedFilename()).toMatch(/\.(csv|zip)$/i);
         await expect(page).toHaveURL(new RegExp(`${URL}$`)); // không điều hướng đi đâu
       });
 
@@ -648,7 +651,7 @@ test.describe("Download History", () => {
           expect(body.filters).toEqual({ status: s.filter });
           test.skip(json.data.list.length === 0, `Không có bản ghi nào ở trạng thái ${label}`);
           for (const v of await columnValues(page, "Status")) expect(v).toBe(label);
-          for (const x of json.data.list) expect(x.status).toBe(s.api);
+          for (const x of json.data.list) expect(s.apis, `status của bản ghi ${x.id}`).toContain(x.status);
         });
       }
 
