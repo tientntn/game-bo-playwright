@@ -505,26 +505,34 @@ test.describe("Administration > Audit Logs", () => {
         ["Applied To", COL.appliedTo],
         ["IP Address", COL.ip],
       ];
-      const problems = new Map(); // mô tả lỗi -> { count, ids }
-      const addProblem = (text, id) => {
-        const p = problems.get(text) || { count: 0, ids: [] };
+      // Mỗi vi phạm ghi rõ DÒNG nào, dữ liệu thực tế là gì và mong đợi gì (hiện nguyên văn trong failures.md); mỗi loại lỗi chỉ liệt kê MAX_SHOWN dòng đầu
+      const MAX_SHOWN = 5;
+      const problems = new Map(); // loại lỗi -> { count, rows: [mô tả dòng] }
+      const addProblem = (type, id, row, actual, expected) => {
+        const p = problems.get(type) || { count: 0, rows: [] };
         p.count++;
-        if (p.ids.length < 3) p.ids.push(id);
-        problems.set(text, p);
+        if (p.rows.length < MAX_SHOWN) {
+          const c = row.cells;
+          p.rows.push(`Dòng id ${id} (${c[COL.time]} | ${c[COL.module]} / ${c[COL.entity]} | Applied To: ${c[COL.appliedTo] || "(trống)"}) - ${type}: dữ liệu = ${actual}; mong đợi = ${expected}`);
+        }
+        problems.set(type, p);
       };
       matrix.forEach((row, i) => {
         const id = list[i].id;
         const tags = row.tags[COL.actionType];
         const moduleName = row.cells[COL.module];
-        if (!DATETIME.test(row.cells[COL.time])) addProblem("Time sai định dạng dd-MM-yyyy HH:mm:ss", id);
-        if (tags.length === 0) addProblem("Action Type trống", id);
-        for (const [name, idx] of textColumns) if (row.cells[idx] === "") addProblem(`${name} trống (Module ${moduleName} / Action ${tags.join(", ")})`, id);
-        if (!MODULES.includes(moduleName) && !MODULE_TABLE_ALIASES.includes(moduleName)) addProblem(`Module "${moduleName}" không có trong bộ lọc Module`, id);
+        if (!DATETIME.test(row.cells[COL.time])) addProblem("Time sai định dạng", id, row, `"${row.cells[COL.time]}"`, "dd-MM-yyyy HH:mm:ss");
+        if (tags.length === 0) addProblem("Action Type trống", id, row, "(trống)", "có ít nhất 1 giá trị");
+        for (const [name, idx] of textColumns) if (row.cells[idx] === "") addProblem(`${name} trống`, id, row, "(trống)", "không để trống");
+        if (!MODULES.includes(moduleName) && !MODULE_TABLE_ALIASES.includes(moduleName)) addProblem("Module không có trong bộ lọc Module", id, row, `"${moduleName}"`, "một trong các Module của bộ lọc Module");
       });
 
-      const summary = [...problems].map(([text, p]) => `${p.count} dòng: ${text} (vd id ${p.ids.join(", ")})`);
+      const summary = [...problems].flatMap(([type, p]) => [
+        ...p.rows,
+        ...(p.count > p.rows.length ? [`... và ${p.count - p.rows.length} dòng khác cùng lỗi "${type}"`] : []),
+      ]);
       const total = [...problems.values()].reduce((n, p) => n + p.count, 0);
-      expect(summary, `${total} vi phạm thuộc ${summary.length} loại lỗi trên ${matrix.length} dòng đã kiểm tra`).toEqual([]);
+      expect(summary, `${total} vi phạm thuộc ${problems.size} loại lỗi trên ${matrix.length} dòng đã kiểm tra`).toEqual([]);
     });
 
     // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): bộ lọc Action Type thiếu các loại hành động đã có trong dữ liệu

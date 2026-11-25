@@ -271,6 +271,23 @@ function explainError(error) {
   return e;
 }
 
+// expect(danhSach).toEqual([]) thất bại: Playwright in diff "- Array []" / "+ Array [ + "mục 1", + "mục 2" ]".
+// Trả về các mục nhận được (mỗi mục thường là 1 câu mô tả dòng vi phạm kèm dữ liệu thực tế / mong đợi) để QA đọc từng dòng; null nếu không phải dạng này.
+function emptyArrayViolations(raw) {
+  if (!/^- Array \[\]\s*$/m.test(raw)) return null;
+  const items = [];
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\+ {3}(".*"),?\s*$/);
+    if (!m) continue;
+    try {
+      items.push(JSON.parse(m[1]));
+    } catch {
+      items.push(m[1]);
+    }
+  }
+  return items.length ? items : null;
+}
+
 function explainErrorCore(error) {
   const raw = stripAnsi((error && (error.message || error.value)) || "");
   const sec = (ms) => `${Math.round(Number(ms) / 1000)} giây`;
@@ -304,6 +321,8 @@ function explainErrorCore(error) {
     return { summary: `Nội dung của ${target || "phần tử"} không đúng.`, expected, actual };
   }
   if (/expect\(received\)\.\w+\(/.test(raw)) {
+    const items = emptyArrayViolations(raw);
+    if (items) return { summary: `Có ${items.length} mục vi phạm (danh sách phải rỗng).`, items, expected: "Không có vi phạm nào (danh sách rỗng)." };
     return { summary: "Giá trị thực tế khác giá trị mong đợi.", expected, actual };
   }
   if (/TypeError|ReferenceError|Cannot read properties|Cannot convert undefined/.test(raw)) {
@@ -477,6 +496,12 @@ class FailuresReporter {
     L.push(`- ❌ ${why.summary}`);
     if (why.detail) L.push(`- Lỗi ở: ${why.detail}`);
     if (why.actual) L.push(`- Thực tế: ${why.actual}`);
+    if (why.items) {
+      L.push("");
+      L.push("**Chi tiết từng mục lỗi (dữ liệu thực tế so với mong đợi):**");
+      for (const it of why.items.slice(0, 40)) L.push(`- ${it}`);
+      if (why.items.length > 40) L.push(`- ... và ${why.items.length - 40} mục khác`);
+    }
     L.push("");
     L.push("**Mong đợi:**");
     L.push(why.expected || 'Xem mục "Kiểm tra" ở trên.');
