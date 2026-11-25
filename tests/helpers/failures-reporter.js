@@ -426,6 +426,16 @@ function screenshotOf(result, baseDir) {
   return a ? path.relative(baseDir, a.path).replace(/\\/g, "/") : null;
 }
 
+// Ảnh chụp riêng cho từng bản ghi sai (tên attachment "evidence: <bản ghi> @ <url>", xem evidenceIfWrong trong persisted.js)
+function evidenceOf(result, baseDir) {
+  return (result.attachments || [])
+    .filter((x) => x.path && /^evidence: /.test(x.name))
+    .map((x) => {
+      const m = x.name.replace(/^evidence: /, "").match(/^(.*) @ (.*)$/);
+      return { label: m ? m[1] : x.name, url: m ? m[2] : "", file: path.relative(baseDir, x.path).replace(/\\/g, "/") };
+    });
+}
+
 function screenOf(test) {
   // titlePath: ["", "chromium", "file.spec.js", "Describe 1", ..., "Tên test"] -> bỏ 3 phần đầu
   const parts = test.titlePath().filter(Boolean);
@@ -640,9 +650,16 @@ class FailuresReporter {
     list.forEach((t, i) => L.push(`${i + 1}. ${t}`));
 
     const shot = screenshotOf(result, baseDir);
+    const evidence = evidenceOf(result, baseDir);
+    if (evidence.length) {
+      L.push("");
+      L.push("**Ảnh màn hình của từng bản ghi sai (chụp ngay lúc đọc bản ghi đó):**");
+      for (const e of evidence.slice(0, 10)) L.push(`- ${e.label}${e.url ? ` - ${e.url}` : ""}: [${e.file}](${e.file})`);
+      if (evidence.length > 10) L.push(`- ... và ${evidence.length - 10} ảnh khác`);
+    }
     if (shot) {
       L.push("");
-      L.push(`**Ảnh lúc lỗi:** [${shot}](${shot})`);
+      L.push(evidence.length ? `**Ảnh lúc test kết thúc (chỉ là trang của bản ghi cuối cùng được mở, không phải bản ghi sai):** [${shot}](${shot})` : `**Ảnh lúc lỗi:** [${shot}](${shot})`);
     }
     L.push("");
   }

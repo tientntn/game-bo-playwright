@@ -8,7 +8,7 @@
 //   3. Khi tạo bản ghi có quan hệ (house, master agent, role...), chọn option KHÔNG phải option đầu / mặc định (xem pickIndexNotDefault).
 //
 // Mỗi sai lệch là 1 dòng "dữ liệu = ...; mong đợi = ..." nên failures.md liệt kê được từng mục lỗi.
-const { expect } = require("@playwright/test");
+const { expect, test } = require("@playwright/test");
 
 // Chuẩn hoá để so sánh: số và chuỗi số coi như nhau (id có thể là 497 hoặc "497"), mảng so không phụ thuộc thứ tự, object so theo khoá
 function canon(v) {
@@ -100,6 +100,20 @@ function expectRelations(groups, checked) {
   expectNoProblems(groups.flatMap(([relation, rows]) => relationProblems(relation, rows)), checked);
 }
 
+// Test lặp qua nhiều bản ghi (mở View của từng bản ghi): ảnh tự chụp lúc test kết thúc chỉ là trang của bản ghi CUỐI CÙNG,
+// không phải trang của bản ghi sai. Gọi hàm này ngay sau khi đọc xong 1 bản ghi (đang đứng ở màn hình của nó): nếu bản ghi đó vi phạm
+// thì chụp màn hình lúc đó và đính kèm; failures.md liệt kê các ảnh này theo từng bản ghi sai.
+//   groups: giống expectRelations nhưng chỉ chứa các dòng của 1 bản ghi; label: tên bản ghi (vd "Master agent id 10 ...")
+let evidenceCount = 0;
+async function evidenceIfWrong(page, groups, label) {
+  if (!groups.some(([relation, rows]) => relationProblems(relation, rows).length)) return;
+  const info = test.info();
+  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+  const file = info.outputPath(`ban-ghi-sai-${++evidenceCount}.png`);
+  await page.screenshot({ path: file });
+  await info.attach(`evidence: ${label} @ ${page.url()}`, { path: file, contentType: "image/png" });
+}
+
 // Tham chiếu so sánh theo MÃ (code) thay vì id: id của cùng 1 house / master agent khác nhau giữa các API
 // (house.id trong masteragent/list ≠ sasEntityId trong entityParent của user / role), còn code thì luôn giống nhau.
 const codeRef = (o) => (o && o.code ? { id: o.code, code: o.code } : undefined);
@@ -143,4 +157,4 @@ async function captureFullList(page, endpoint, path, pageSize = 200) {
   }
 }
 
-module.exports = { diffPersisted, expectPersisted, expectRelations, expectNoProblems, relationProblems, pickIndexNotDefault, captureJson, captureFullList, codeRef, bySasEntityId };
+module.exports = { diffPersisted, expectPersisted, expectRelations, evidenceIfWrong, expectNoProblems, relationProblems, pickIndexNotDefault, captureJson, captureFullList, codeRef, bySasEntityId };

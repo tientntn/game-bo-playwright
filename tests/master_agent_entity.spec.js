@@ -32,7 +32,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
-const { expectPersisted, expectRelations, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
+const { expectPersisted, expectRelations, evidenceIfWrong, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1233,12 +1233,14 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
       if (i > 0) await Promise.all([page.waitForResponse(isList, { timeout: 60000 }), page.goto(URL)]);
       const [viewRes] = await Promise.all([page.waitForResponse(isView), actionIcon(page, i, 0).click()]);
       const view = (await viewRes.json()).data;
-      rows.push({
+      const row = {
         label: `Master agent id ${x.id} "${x.name}"`,
         why: `parentSasEntityId = ${view.parentSasEntityId}`,
         expected: houseBySas.get(String(view.parentSasEntityId)),
         shown: [["cột House của danh sách", x.house], ["màn hình View", view.house]],
-      });
+      };
+      rows.push(row);
+      await evidenceIfWrong(page, [["house", [row]]], row.label); // chụp ngay màn hình View của bản ghi sai
     }
     expectRelations([["house", rows]], `${rows.length} master agent`);
   });
