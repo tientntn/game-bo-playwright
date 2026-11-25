@@ -490,8 +490,11 @@ test.describe("Games > Denominations", () => {
       test.skip(labels.length === 0, "Không có Currency nào");
       const titles = await dropdownOptions(page, "currencyIds");
       expect(titles.length).toBeGreaterThan(0);
-      // Danh sách ảo có thể chỉ render các option đầu tiên -> so với phần đầu của response
-      expect(titles).toEqual(labels.slice(0, titles.length));
+      // Giao diện tự sắp lại option theo thứ tự chữ của trình duyệt (localeCompare: "_" đứng trước chữ cái, vd "TECa_ca" trước "TECaCaludi"),
+      // còn API trả theo mã ký tự (vd "TECaCaludi" trước "TECa_ca") -> so với response đã sắp theo localeCompare. Vẫn bắt được option thừa / thiếu.
+      // Danh sách ảo có thể chỉ render các option đầu tiên -> so với phần đầu của danh sách đã sắp
+      const sorted = [...labels].sort((a, b) => a.localeCompare(b));
+      expect(titles).toEqual(sorted.slice(0, titles.length));
     });
 
     test("Lọc theo Currency của dòng đầu tiên gửi currencyIds=[id] và chỉ còn đúng currency đó", async ({ page }) => {
