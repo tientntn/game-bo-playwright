@@ -75,6 +75,9 @@ const MODULES = [
   "Roles",
   "Users",
 ];
+// Tên Module hiển thị ở BẢNG khác nhãn của option trong bộ lọc Module: option có value "GameRound" mang nhãn "Pending Game Round" (đã dịch),
+// còn cột Module của bảng hiển thị chữ thô "GameRound" (FE không có bản dịch cho key này). Lọc theo option đó vẫn ra đúng các dòng -> chấp nhận cả hai tên.
+const MODULE_TABLE_ALIASES = ["GameRound"];
 const DATETIME = /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/;
 const MSG = { noEntries: "There are no entries found" };
 
@@ -516,7 +519,7 @@ test.describe("Administration > Audit Logs", () => {
         if (!DATETIME.test(row.cells[COL.time])) addProblem("Time sai định dạng dd-MM-yyyy HH:mm:ss", id);
         if (tags.length === 0) addProblem("Action Type trống", id);
         for (const [name, idx] of textColumns) if (row.cells[idx] === "") addProblem(`${name} trống (Module ${moduleName} / Action ${tags.join(", ")})`, id);
-        if (!MODULES.includes(moduleName)) addProblem(`Module "${moduleName}" không có trong bộ lọc Module`, id);
+        if (!MODULES.includes(moduleName) && !MODULE_TABLE_ALIASES.includes(moduleName)) addProblem(`Module "${moduleName}" không có trong bộ lọc Module`, id);
       });
 
       const summary = [...problems].map(([text, p]) => `${p.count} dòng: ${text} (vd id ${p.ids.join(", ")})`);
