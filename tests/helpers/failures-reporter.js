@@ -9,7 +9,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const OUTPUT = path.resolve(process.cwd(), "test-results", "failures.md");
+const OUTPUT = process.env.FAILURES_OUTPUT || path.resolve(process.cwd(), "test-results", "failures.md"); // FAILURES_OUTPUT: chỉ để thử định dạng mà không ghi đè báo cáo thật
 const MAX_STEPS = 18; // số bước gần nhất (trước chỗ lỗi) hiển thị cho mỗi test
 
 const stripAnsi = (s) => String(s || "").replace(/\u001b\[[0-9;]*m/g, "");
@@ -69,6 +69,17 @@ function hasKnownBugMarker(test) {
 }
 
 // URL đầy đủ của màn hình, lấy từ dòng comment đầu spec: "// Administration > Audit Logs  (https://dev-bo.../admin/audit-logs)"
+// Domain thực tế của lần chạy (playwright.config.js: use.baseURL = https://BO_DOMAIN/), không phải domain ghi trong comment đầu spec (vd dev-bo)
+function baseUrlOf(test) {
+  try {
+    const base = test.parent.project().use.baseURL;
+    if (base) return base;
+  } catch {
+    /* không đọc được project */
+  }
+  return process.env.BO_DOMAIN ? `https://${process.env.BO_DOMAIN}/` : null;
+}
+
 function specUrl(test) {
   for (const l of fileLines(test.location.file).slice(0, 4)) {
     const m = l.match(/\((https?:\/\/[^)\s]+)\)/);
@@ -288,6 +299,42 @@ function emptyArrayViolations(raw) {
   return items.length ? items : null;
 }
 
+// expect(a).toEqual(b) thất bại với mảng / object: Playwright in diff (dòng "- " = chỉ có ở MONG ĐỢI, "+ " = chỉ có ở THỰC TẾ, dòng không đổi
+// là ngữ cảnh, phần còn lại bị lược bớt). Trả về để QA thấy ngay chỗ lệch:
+//   { reordered: false, expected: [giá trị chỉ có ở mong đợi], actual: [giá trị chỉ có ở thực tế] }   (vd mong đợi 148, thực tế 146)
+//   { reordered: true,  expected: "... A, B ...", actual: "... B, A ..." }                             (cùng giá trị nhưng khác THỨ TỰ)
+// null nếu không có diff.
+const MAX_DIFF = 15;
+function diffValues(raw) {
+  const at = raw.search(/^@@ .* @@/m);
+  if (at < 0) return null;
+  const seqE = []; // chuỗi theo mong đợi: { v, changed }
+  const seqA = []; // chuỗi theo thực tế
+  for (const line of raw.slice(at).split(String.fromCharCode(10)).slice(1)) {
+    const m = line.match(/^([-+ ]) *([^ ].*)$/);
+    if (!m) continue;
+    const val = m[2].replace(/,$/, "").trim();
+    if (/^[\]\[{}()]+$/.test(val) || /^(Array|Object) [\[{]$/.test(val)) continue; // dòng mở / đóng khối, không phải giá trị
+    if (m[1] !== "+") seqE.push({ v: val, changed: m[1] === "-" });
+    if (m[1] !== "-") seqA.push({ v: val, changed: m[1] === "+" });
+  }
+  const onlyE = seqE.filter((x) => x.changed).map((x) => x.v);
+  const onlyA = seqA.filter((x) => x.changed).map((x) => x.v);
+  if (!onlyE.length && !onlyA.length) return null;
+  // Cùng tập giá trị, khác thứ tự: hiện đoạn bị đổi chỗ kèm 1 giá trị ngữ cảnh mỗi bên
+  if (onlyE.length === onlyA.length && [...onlyE].sort().join("\u0000") === [...onlyA].sort().join("\u0000")) {
+    const win = (seq) => {
+      const idx = seq.map((x, i) => (x.changed ? i : -1)).filter((i) => i >= 0);
+      const from = Math.max(0, idx[0] - 1);
+      const to = Math.min(seq.length - 1, idx[idx.length - 1] + 1);
+      return `${from > 0 ? "... " : ""}${seq.slice(from, to + 1).map((x) => x.v).join(", ")}${to < seq.length - 1 ? " ..." : ""}`;
+    };
+    return { reordered: true, expected: win(seqE), actual: win(seqA) };
+  }
+  const cut = (arr) => (arr.length > MAX_DIFF ? [...arr.slice(0, MAX_DIFF), `... và ${arr.length - MAX_DIFF} giá trị khác`] : arr);
+  return { reordered: false, expected: cut(onlyE), actual: cut(onlyA) };
+}
+
 function explainErrorCore(error) {
   const raw = stripAnsi((error && (error.message || error.value)) || "");
   const sec = (ms) => `${Math.round(Number(ms) / 1000)} giây`;
@@ -323,6 +370,18 @@ function explainErrorCore(error) {
   if (/expect\(received\)\.\w+\(/.test(raw)) {
     const items = emptyArrayViolations(raw);
     if (items) return { summary: `Có ${items.length} mục vi phạm (danh sách phải rỗng).`, items, expected: "Không có vi phạm nào (danh sách rỗng)." };
+    const d = diffValues(raw);
+    if (d && d.reordered) {
+      return { summary: "Các giá trị giống nhau nhưng khác THỨ TỰ (chỉ hiện đoạn bị đổi chỗ).", actual: d.actual, expected: d.expected };
+    }
+    if (d) {
+      const none = "(không có giá trị nào khác)";
+      return {
+        summary: "Giá trị thực tế khác giá trị mong đợi (chỉ liệt kê các giá trị KHÁC NHAU; các giá trị còn lại giống nhau).",
+        actual: d.actual.length ? d.actual.join(", ") : none,
+        expected: d.expected.length ? d.expected.join(", ") : none,
+      };
+    }
     return { summary: "Giá trị thực tế khác giá trị mong đợi.", expected, actual };
   }
   if (/TypeError|ReferenceError|Cannot read properties|Cannot convert undefined/.test(raw)) {
@@ -485,7 +544,17 @@ class FailuresReporter {
     const urlStep = steps.find((s) => NAV.test(s.text));
     const stepUrl = urlStep ? urlStep.text.match(/`(.*)`/)[1] : null;
     // Ưu tiên URL đầy đủ ghi ở đầu spec (có domain) nếu khớp với đường dẫn test đã mở
-    const header = specUrl(test);
+    const headerRaw = specUrl(test);
+    const base = baseUrlOf(test);
+    let header = headerRaw;
+    if (headerRaw && base) {
+      try {
+        const u = new URL(headerRaw);
+        header = new URL(u.pathname + u.search, base).href; // giữ đường dẫn của spec, đổi domain theo môi trường đang chạy
+      } catch {
+        header = headerRaw;
+      }
+    }
     const url = header && (!stepUrl || header.endsWith(stepUrl)) ? header : stepUrl;
     const open = url ? `Truy cập màn hình \`${url}\`` : `Truy cập màn hình **${screen}**`;
 
@@ -549,3 +618,4 @@ class FailuresReporter {
 }
 
 module.exports = FailuresReporter;
+module.exports.explainError = explainError; // để kiểm tra định dạng lỗi mà không cần chạy test

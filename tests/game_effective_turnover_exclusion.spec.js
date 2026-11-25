@@ -833,7 +833,7 @@ test.describe("Games > Effective Turnover Exclusion", () => {
       // Chỉ so TẬP game khi toàn bộ dữ liệu nằm gọn 1 trang: nếu có nhiều trang hơn thì sort theo Game Name đổi game nào nằm ở trang 1
       // (vd 11 bản ghi, 10 dòng / trang) nên tập game của trang 1 đổi theo là đúng
       if (json.data.totalCount <= json.data.list.length) {
-        expect(asc.json.data.list.map((g) => g.id).sort((a, b) => a - b)).toEqual(ids);
+        expect(asc.json.data.list.map((g) => g.id).sort((a, b) => a - b), "Tập id game sau khi sort Game Name khác tập id trước khi sort").toEqual(ids);
       }
       await expect(rows(page)).toHaveCount(json.data.list.length);
       expect(await columnValues(page, "Game Name")).toEqual(asc.json.data.list.map((g) => norm(g.gameName)));
