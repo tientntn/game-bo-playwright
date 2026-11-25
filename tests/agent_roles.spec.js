@@ -35,7 +35,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
-const { relationMismatches, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
+const { expectRelations, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -444,7 +444,7 @@ test.describe("Agent > Agent Roles", () => {
       const agentBySas = bySasEntityId((await captureFullList(page, "/agent/list", "/agent/entity")).data.list);
       const list = (await captureFullList(page, "/role/listhierarchy", URL)).data.list;
       test.skip(list.length === 0, "Không có dữ liệu");
-      const bad = [];
+      const groups = [];
       for (const [name, pick, shown, expectedOf] of [
         ["agent", agentOf, "cột Agent", (a) => a],
         ["master agent", masterOf, "cột Master Agent", (a) => a && a.masterAgent],
@@ -452,13 +452,13 @@ test.describe("Agent > Agent Roles", () => {
       ]) {
         const rows = list.map((x) => ({
           label: `Role id ${x.id} "${x.code}"`,
-          why: `entityId = ${x.entityId}` + (name === "agent" ? "" : " (cha của agent đó)"),
+          why: `entityId = ${x.entityId}` + (name === "agent" ? "" : ", cha của agent đó"),
           expected: codeRef(expectedOf(agentBySas.get(String(x.entityId)))),
           shown: [[`${shown} của danh sách`, codeRef(pick(x))]],
         }));
-        bad.push(...relationMismatches(name, rows));
+        groups.push([name, rows]);
       }
-      expect(bad, `${bad.length} sai lệch quan hệ agent / master agent / house của role`).toEqual([]);
+      expectRelations(groups, `${list.length} role`);
     });
 
     // ===== 1. Hiển thị màn hình =====

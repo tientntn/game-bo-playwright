@@ -34,7 +34,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, selectedCount, waitTableIdleScoped: waitTableIdle, settleScoped: settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
-const { expectPersisted, relationMismatches, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
+const { expectPersisted, expectRelations, captureFullList, codeRef, bySasEntityId } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -450,8 +450,7 @@ test.describe("House > House Users", () => {
         expected: codeRef(houseBySas.get(String(x.sasEntityId))),
         shown: [["cột House của danh sách", codeRef(houseOf(x))]],
       }));
-      const bad = relationMismatches("house", rows);
-      expect(bad, `${bad.length} user có house hiển thị không khớp sasEntityId`).toEqual([]);
+      expectRelations([["house", rows]], `${rows.length} user`);
     });
 
     // ===== 1. Hiển thị màn hình =====

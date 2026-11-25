@@ -35,7 +35,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
-const { expectPersisted, relationMismatches, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
+const { expectPersisted, expectRelations, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1337,10 +1337,9 @@ test.describe("Agents > View / Update / Create (không ghi dữ liệu thật)",
       const label = `Agent id ${x.id} "${x.name}"`;
       const why = `parentSasEntityId = ${view.parentSasEntityId}`;
       maRows.push({ label, why, expected: ma, shown: [["cột Master Agent của danh sách", x.masterAgent], ["màn hình View", view.masterAgent]] });
-      houseRows.push({ label, why: `${why} (house của master agent đó)`, expected: ma && ma.house, shown: [["cột House của danh sách", x.house], ["màn hình View", view.house]] });
+      houseRows.push({ label, why: `${why}, house của master agent đó`, expected: ma && ma.house, shown: [["cột House của danh sách", x.house], ["màn hình View", view.house]] });
     }
-    const bad = [...relationMismatches("master agent", maRows), ...relationMismatches("house", houseRows)];
-    expect(bad, `${bad.length} sai lệch quan hệ master agent / house của agent`).toEqual([]);
+    expectRelations([["master agent", maRows], ["house", houseRows]], `${list.length} agent`);
   });
 
   // ===== View =====

@@ -4,10 +4,10 @@
 // nhưng server gán house mặc định). Test chỉ kiểm tra `status === "success"` hoặc chọn option ĐẦU TIÊN (thường trùng giá trị mặc định)
 // thì không bao giờ thấy. Ba cách bắt được lỗi dạng này:
 //   1. expectPersisted  - sau khi tạo / sửa, ĐỌC LẠI (view / list) rồi so từng trường với dữ liệu đã gửi.
-//   2. relationMismatches - kiểm tra CHÉO các nguồn đọc: quan hệ cha-con trong list / view phải khớp nhau (chỉ đọc, chạy hằng ngày).
+//   2. expectRelations - kiểm tra CHÉO các nguồn đọc: quan hệ cha-con trong list / view phải khớp nhau (chỉ đọc, chạy hằng ngày).
 //   3. Khi tạo bản ghi có quan hệ (house, master agent, role...), chọn option KHÔNG phải option đầu / mặc định (xem pickIndexNotDefault).
 //
-// Mỗi sai lệch là 1 câu "đã gửi / server lưu" hoặc "mong đợi / hiển thị" nên failures.md liệt kê được từng trường lỗi.
+// Mỗi sai lệch là 1 dòng "dữ liệu = ...; mong đợi = ..." nên failures.md liệt kê được từng mục lỗi.
 const { expect } = require("@playwright/test");
 
 // Chuẩn hoá để so sánh: số và chuỗi số coi như nhau (id có thể là 497 hoặc "497"), mảng so không phụ thuộc thứ tự, object so theo khoá
@@ -20,15 +20,52 @@ function canon(v) {
 const same = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 const show = (v) => (v === undefined ? "(không có)" : JSON.stringify(v));
 
-// pairs: [[tên trường, giá trị đã gửi, giá trị server lưu]] -> danh sách câu mô tả trường bị lệch (rỗng = khớp hết)
-function diffPersisted(pairs) {
-  return pairs
-    .filter(([, sent, stored]) => !same(sent, stored))
-    .map(([field, sent, stored]) => `Trường ${field}: đã gửi = ${show(sent)}; server lưu = ${show(stored)}`);
+// ---------------------------------------------------------------------------------------------------------------------
+// Định dạng báo lỗi: GIỐNG test "Định dạng trên 200 dòng đầu" của admin_audit_logs (hiện nguyên văn trong failures.md)
+//   tiêu đề : "N vi phạm thuộc K loại lỗi trên M <đối tượng> đã kiểm tra"
+//   mỗi dòng: "<bản ghi> (<ngữ cảnh>) - <loại lỗi>: dữ liệu = <thực tế>; mong đợi = <đúng ra phải là>"
+//   mỗi loại lỗi chỉ liệt kê MAX_SHOWN dòng đầu, phần còn lại gom thành "... và N dòng khác cùng lỗi".
+// ---------------------------------------------------------------------------------------------------------------------
+const MAX_SHOWN = 5;
+
+// problems: [{ type, line }] -> { summary: [dòng], total, types }
+function summarizeProblems(problems) {
+  const groups = new Map(); // loại lỗi -> { count, lines }
+  for (const p of problems) {
+    const g = groups.get(p.type) || { count: 0, lines: [] };
+    g.count++;
+    if (g.lines.length < MAX_SHOWN) g.lines.push(p.line);
+    groups.set(p.type, g);
+  }
+  const summary = [...groups].flatMap(([type, g]) => [
+    ...g.lines,
+    ...(g.count > g.lines.length ? [`... và ${g.count - g.lines.length} dòng khác cùng lỗi "${type}"`] : []),
+  ]);
+  return { summary, total: problems.length, types: groups.size };
 }
 
+// checked: mô tả đối tượng đã kiểm tra, vd "200 dòng" / "8 master agent"; note: ghi chú thêm (không bắt buộc)
+function expectNoProblems(problems, checked, note) {
+  const { summary, total, types } = summarizeProblems(problems);
+  expect(summary, `${total} vi phạm thuộc ${types} loại lỗi trên ${checked} đã kiểm tra${note ? ` (${note})` : ""}`).toEqual([]);
+}
+
+// pairs: [[tên trường, giá trị mong đợi (đã gửi / đã chọn), giá trị server lưu]] -> danh sách vi phạm (rỗng = khớp hết)
+function persistedProblems(pairs) {
+  return pairs
+    .filter(([, sent, stored]) => !same(sent, stored))
+    .map(([field, sent, stored]) => {
+      const type = `Trường ${field} lưu sai`;
+      return { type, line: `${type}: dữ liệu = ${show(stored)}; mong đợi = ${show(sent)}` };
+    });
+}
+
+// Dạng mảng câu (rỗng = khớp hết), giữ lại cho nơi cần tự xử lý
+const diffPersisted = (pairs) => persistedProblems(pairs).map((p) => p.line);
+
+// Sau khi tạo / sửa: ĐỌC LẠI rồi so từng trường. message = mô tả tình huống (vd "Master agent id 10 ...")
 function expectPersisted(pairs, message) {
-  expect(diffPersisted(pairs), message).toEqual([]);
+  expectNoProblems(persistedProblems(pairs), `${pairs.length} trường`, message);
 }
 
 // Quan hệ cha-con phải nhất quán giữa các nguồn đọc.
@@ -36,23 +73,31 @@ function expectPersisted(pairs, message) {
 //   rows: [{ label, why, expected: { id, code } | undefined, shown: [[nơi hiển thị, { id, code }]] }]
 //     expected = bản ghi cha SUY RA từ nguồn đáng tin (vd house có sasEntityId = parentSasEntityId của view)
 //     shown    = cha mà các màn hình / API khác đang hiển thị cho cùng bản ghi
-function relationMismatches(relation, rows) {
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const showRef = (ref) => (!ref ? "(trống)" : String(ref.id) === String(ref.code) ? `"${ref.code}"` : `"${ref.code}" (id ${ref.id})`);
+
+function relationProblems(relation, rows) {
   const out = [];
   for (const r of rows) {
+    const where0 = `${r.label} (${r.why})`;
     if (!r.expected) {
-      out.push(`${r.label}: không tìm thấy ${relation} nào theo ${r.why}`);
+      const type = `Không tìm thấy ${relation} cha`;
+      out.push({ type, line: `${where0} - ${type}: dữ liệu = (không có); mong đợi = có 1 ${relation} khớp ${r.why}` });
       continue;
     }
     for (const [where, ref] of r.shown) {
       if (!ref || String(ref.id) !== String(r.expected.id)) {
-        out.push(
-          `${r.label}: ${relation} theo ${r.why} là "${r.expected.code}" (id ${r.expected.id}), ` +
-            `nhưng ${where} hiển thị "${ref ? ref.code : "(trống)"}" (id ${ref ? ref.id : "-"})`,
-        );
+        const type = `${cap(relation)} sai ở ${where}`;
+        out.push({ type, line: `${where0} - ${type}: dữ liệu = ${showRef(ref)}; mong đợi = ${showRef(r.expected)}` });
       }
     }
   }
   return out;
+}
+
+// groups: [[relation, rows], ...]; checked: vd "8 master agent". Báo lỗi 1 lần cho tất cả quan hệ
+function expectRelations(groups, checked) {
+  expectNoProblems(groups.flatMap(([relation, rows]) => relationProblems(relation, rows)), checked);
 }
 
 // Tham chiếu so sánh theo MÃ (code) thay vì id: id của cùng 1 house / master agent khác nhau giữa các API
@@ -98,4 +143,4 @@ async function captureFullList(page, endpoint, path, pageSize = 200) {
   }
 }
 
-module.exports = { diffPersisted, expectPersisted, relationMismatches, pickIndexNotDefault, captureJson, captureFullList, codeRef, bySasEntityId };
+module.exports = { diffPersisted, expectPersisted, expectRelations, expectNoProblems, relationProblems, pickIndexNotDefault, captureJson, captureFullList, codeRef, bySasEntityId };

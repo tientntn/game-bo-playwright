@@ -32,7 +32,7 @@
 const { test, expect } = require("@playwright/test");
 const { filterEl, resetBtn, dialog, bodyOf, ORIGIN, openDropdown, waitTableIdle, settle, checkMenuItems } = require("./helpers/ui");
 const { buildStorageState } = require("./helpers/session");
-const { expectPersisted, relationMismatches, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
+const { expectPersisted, expectRelations, pickIndexNotDefault, captureJson, captureFullList } = require("./helpers/persisted");
 const { RUN_FULL_TESTS, SKIP_WRITE_REASON } = require("./helpers/flags");
 
 const VIEWPORT = { width: 1920, height: 1080 };
@@ -1239,8 +1239,7 @@ test.describe("Master Agents > View / Update / Create (không ghi dữ liệu th
         shown: [["cột House của danh sách", x.house], ["màn hình View", view.house]],
       });
     }
-    const bad = relationMismatches("house", rows);
-    expect(bad, `${bad.length} master agent có house hiển thị không khớp parentSasEntityId`).toEqual([]);
+    expectRelations([["house", rows]], `${rows.length} master agent`);
   });
 
   // ===== View =====
