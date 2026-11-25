@@ -1,6 +1,7 @@
 // Test cho MasterAgentController (D:\Net\bo_backend\AlizeGames.BO.API\Controllers\MasterAgentController.cs)
 const { test, expect } = require("./fixtures");
 const { apiPost } = require("./helpers/api-client");
+const { expectPersisted } = require("../helpers/persisted");
 
 function uniqueSuffix() {
   return `${Date.now()}${Math.floor(Math.random() * 1000)}`;
@@ -192,7 +193,13 @@ test.describe("MasterAgent API - /masteragent/create", () => {
   // tạo SasEntity) - tức đây là 1 bug hệ thống ảnh hưởng House/MasterAgent/Agent như nhau, không
   // phải lỗi riêng của module này. Test này CỐ TÌNH để fail đỏ - không dùng test.fail() - để
   // nhắc backend xử lý mỗi lần chạy suite, cho tới khi bug được fix.
-  test("creates a master agent under an existing house", async ({
+  //
+  // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (dev đã nhận lỗi; đã tái hiện trên staging, master agent id 10): masteragent/create trả
+  // success với parentId = house KHÔNG phải mặc định, nhưng masteragent/list và masteragent/view trả `house` = house mặc định
+  // (Royal Edge House, id 1) dù parentSasEntityId vẫn đúng. Test chọn house THỨ HAI trong dropdown/house (house đầu thường là
+  // house mặc định nên che mất lỗi), tạo rồi ĐỌC LẠI qua masteragent/view + list và so house với house đã gửi.
+  // Master agent tạo ra được Deactivate ở finally (API không có xoá).
+  test("creates a master agent under a non-default house and stores that house", async ({
     authedRequest,
   }) => {
     const { json: houseDropdown } = await apiPost(
@@ -202,12 +209,14 @@ test.describe("MasterAgent API - /masteragent/create", () => {
     );
     expect(houseDropdown.status).toBe("success");
     test.skip(
-      houseDropdown.data.length === 0,
-      "Không có house nào trên DB dev để làm parent",
+      houseDropdown.data.length < 2,
+      "Cần ít nhất 2 house: chỉ 1 house thì không phân biệt được house đã chọn với house mặc định",
     );
-    const parentSasEntityId = houseDropdown.data[0].sasEntityId;
+    const house = houseDropdown.data[1];
+    const parentSasEntityId = house.sasEntityId;
 
     const suffix = uniqueSuffix();
+    const name = `QA Test MA ${suffix}`;
     const [{ json: currencyList }, { json: categoryList }] = await Promise.all([
       apiPost(authedRequest, "/currency/list", {
         page: 1,
@@ -224,27 +233,61 @@ test.describe("MasterAgent API - /masteragent/create", () => {
     const currencyId = currencyList.data.list[0].id;
     const gameCategoryId = categoryList.data.list[0].id;
 
-    const { json: createJson } = await apiPost(
-      authedRequest,
-      "/masteragent/create",
-      {
-        sasEntityHierarchyId: 3, // MasterAgent (xem SasEntityHierarchyEnum)
-        name: `QA Test MA ${suffix}`,
-        entityCode: `QATESTMA${suffix}`,
-        parentId: parentSasEntityId,
-        currencyIds: [currencyId],
-        gameCategoryIds: [gameCategoryId],
-        status: 1,
-        timezoneId: 336,
-        products: {},
-        geofencing: {
-          country: [],
-          geofencingDelete: [],
-          ipv4: [],
-          ipv6: [],
-        },
+    const sent = {
+      sasEntityHierarchyId: 3, // MasterAgent (xem SasEntityHierarchyEnum)
+      name,
+      entityCode: `QATESTMA${suffix}`,
+      parentId: parentSasEntityId,
+      currencyIds: [currencyId],
+      gameCategoryIds: [gameCategoryId],
+      status: 1,
+      timezoneId: 336,
+      products: {},
+      geofencing: {
+        country: [],
+        geofencingDelete: [],
+        ipv4: [],
+        ipv6: [],
       },
-    );
-    expect(createJson.status).toBe("success");
+    };
+    const { json: createJson } = await apiPost(authedRequest, "/masteragent/create", sent);
+    expect(createJson.status, `masteragent/create trả ${createJson.messageCode}: ${createJson.message}`).toBe("success");
+
+    // Tìm id master agent vừa tạo: ưu tiên id trong response create, không có thì tìm theo tên trong list (id mới nhất trước)
+    const listAll = () =>
+      apiPost(authedRequest, "/masteragent/list", { page: 1, pageSize: 200, sortBy: "id", sortDirection: "desc", filters: {} });
+    let id = createJson.data && typeof createJson.data === "object" ? createJson.data.id : createJson.data;
+    if (!id) {
+      const { json: listJson } = await listAll();
+      const found = listJson.data.list.find((m) => m.name === name);
+      expect(found, `Không thấy master agent "${name}" trong masteragent/list sau khi create thành công`).toBeTruthy();
+      id = found.id;
+    }
+
+    try {
+      const { json: viewJson } = await apiPost(authedRequest, "/masteragent/view", { id });
+      expect(viewJson.status).toBe("success");
+      const stored = viewJson.data;
+      const { json: listAfter } = await listAll();
+      const row = listAfter.data.list.find((m) => m.id === id);
+      expectPersisted(
+        [
+          ["name", sent.name, stored.name],
+          ["entityCode ↔ code", sent.entityCode, stored.code],
+          ["status", sent.status, stored.status],
+          ["parentId ↔ parentSasEntityId", sent.parentId, stored.parentSasEntityId],
+          ["house đã chọn (id) ↔ view.house.id", house.value, stored.house && stored.house.id],
+          ["house đã chọn (mã) ↔ view.house.code", house.code, stored.house && stored.house.code],
+          ["house đã chọn (id) ↔ list.house.id", house.value, row && row.house && row.house.id],
+          ["currencyIds ↔ currencies", sent.currencyIds, (stored.currencies || []).map((c) => c.id)],
+          ["gameCategoryIds ↔ gameCategoryList", sent.gameCategoryIds, (stored.gameCategoryList || []).map((c) => c.id)],
+        ],
+        `Master agent id ${id}: server lưu khác dữ liệu đã gửi khi tạo (masteragent/create trả success)`,
+      );
+    } finally {
+      // Dọn: không có API xoá, chỉ Deactivate master agent QA vừa tạo
+      const { json: offJson } = await apiPost(authedRequest, "/masteragent/update-status", { ids: [id], status: 0 });
+      expect(offJson.status).toBe("success");
+    }
   });
 });
