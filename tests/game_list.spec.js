@@ -818,6 +818,8 @@ test.describe("Games > Games", () => {
       for (const v of await columnValues(page, "Game Sub Category")) expect(v).toBe(sub);
     });
 
+    // LỖI ỨNG DỤNG ĐÃ XÁC NHẬN (giữ test FAIL cho tới khi sửa): lọc theo Currency đang trả cả những game không có currency đó trong cột
+    // Currency (vd lọc AFN trả 59 game nhưng 27 game không có AFN; game 258 chỉ có AMD). Test kiểm tra đúng hành vi mong đợi.
     test("Lọc theo Currency gửi currencyIds và mọi game đều hỗ trợ currency đó", async ({ page }) => {
       const { json } = await search(page);
       test.skip(json.data.list.length === 0, "Không có dữ liệu");
@@ -828,9 +830,6 @@ test.describe("Games > Games", () => {
       expect(body.filters.currencyIds).toHaveLength(1);
       expect(res.data.list.length).toBeGreaterThan(0);
       expect(res.data.totalCount).toBeLessThanOrEqual(json.data.totalCount);
-      // LỖI BACKEND ĐÃ XÁC NHẬN: lọc theo Currency đang trả cả những game không có currency đó trong cột Currency
-      // (vd lọc AFN trả 59 game nhưng 27 game không có AFN). Test này kiểm tra đúng hành vi mong đợi nên sẽ FAIL
-      // cho tới khi backend sửa.
       for (const g of res.data.list) expect(g.currencies, `game ${g.id}`).toContain(currency);
     });
 
