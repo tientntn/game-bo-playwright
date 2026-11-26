@@ -16,6 +16,11 @@
 //  - Cột Action: icon Download (thẻ <a href> trỏ thẳng link S3 presigned, hết hạn 7 ngày; tooltip "Download"; bản ghi Error thì ẩn) và icon Delete (tooltip "Delete").
 //  - Chọn dòng: checkbox từng dòng + checkbox ở header (chọn cả trang). Nút thùng rác (bulk delete) chỉ bật khi có dòng được chọn -> hộp thoại "Delete N files" -> POST download/delete {ids:[...]}.
 //    Delete từng dòng: hộp thoại "Delete downloaded file with id N" -> cùng API download/delete {ids:[N]}.
+//  - Bản ghi PROCESSING (vừa bấm Export / Download ở màn hình khác, file chưa tạo xong; API trả status "IN PROGRESS", fileName null, fileSize "", endTime "", link null; thường vài chục giây
+//    rồi chuyển Completed, nhưng cũng có bản ghi kẹt Processing mãi): File Name và Size hiện spinner + chữ "Processing"; End Time "-"; Status là tag vàng (tag-warning), không có icon (i);
+//    checkbox của dòng BỊ KHOÁ (disabled, không tick được) nên checkbox header chỉ chọn các dòng còn lại, hộp thoại bulk đếm "Delete N files" theo số dòng chọn được, cả trang đều Processing
+//    thì checkbox header cũng khoá; cột Action chỉ có icon Download bị làm mờ (không phải thẻ <a>, không có link) và KHÔNG có icon Delete -> bản ghi Processing không xoá được.
+//    => mọi test chọn / xoá dòng phải chọn dòng KHÔNG ở trạng thái Processing (hàm idleRows), vì dòng Processing có thể nằm ở bất kỳ vị trí nào của trang.
 //  - Manage Columns: chỉ có checkbox ẩn / hiện cột (không có Save / Reset to Default), không lưu sau reload. Không có Add / Update / Export / Details.
 //  - Filter (mã hoá) và số dòng / trang được lưu ở localStorage (key DEV-download-history_filter / _page_size) nên còn nguyên sau reload.
 //
@@ -84,7 +89,7 @@ const MODULES = {
 const STATUSES = {
   Completed: { filter: 1, apis: ["COMPLETED"], cls: /tag-success/ },
   Error: { filter: -1, apis: ["ABORTED"], cls: /tag-error/ },
-  Processing: { filter: 0, apis: ["PROCESSING", "IN PROGRESS"], cls: null },
+  Processing: { filter: 0, apis: ["PROCESSING", "IN PROGRESS"], cls: /tag-warning/ },
 };
 const STATUS_TEXT = { COMPLETED: "Completed", ABORTED: "Error", PROCESSING: "Processing", "IN PROGRESS": "Processing" };
 // Section hiển thị: bảng ánh xạ cố định của app (không có quy tắc chung: "Report" / "Reports" lẫn lộn, REPORTS_GAME_RECOMMENDATION hiện nguyên enum)
@@ -171,6 +176,12 @@ const downloadIcon = (row) => row.locator("td").nth(COL.action).locator("svg").n
 const deleteIcon = (row) => row.locator("td").nth(COL.action).locator("svg").nth(1);
 const expireIcon = (row) => row.locator(".tooltip-expire__icon");
 const bulkDeleteBtn = (page) => page.locator("button.NextGen-button-more-action__update");
+// Mọi icon của cột Action (dòng Processing chỉ có 1 icon Download bị làm mờ, không có Delete)
+const actionIcons = (row) => row.locator("td").nth(COL.action).locator("svg");
+// Dòng Processing: ô File Name / Size hiện spinner + chữ "Processing" thay cho giá trị
+const loadingText = (row, col) => row.locator("td").nth(col).locator(".loading-container .loading-text");
+// Checkbox chọn được của trang (checkbox dòng Processing bị khoá)
+const enabledCheckboxes = (page) => table(page).locator("tbody input[type=checkbox]:not(:disabled)");
 
 const summary = (page) => page.getByText(/^Showing \d+ - \d+ of [\d,]+ records$/);
 const searchBtn = (page) => page.getByRole("button", { name: "search Search" });
@@ -322,6 +333,34 @@ async function ensureData(page) {
   test.skip((await rows(page).count()) === 0, "Download History không có bản ghi nào để test");
 }
 
+// Bản ghi đang xử lý (response "IN PROGRESS" / "PROCESSING"; dòng hiển thị "Processing")
+const isProcessingItem = (x) => STATUSES.Processing.apis.includes(x.status);
+const isProcessingRow = (m) => m.cells[COL.status] === "Processing";
+
+// Chỉ số (trong trang) của các dòng KHÔNG ở trạng thái Processing: chỉ các dòng này tick / xoá được (dòng Processing khoá checkbox và không có icon Delete).
+// Dòng Processing có thể nằm ở bất kỳ vị trí nào của trang nên test chọn / xoá phải dùng hàm này thay vì dòng đầu. Skip test nếu có ít hơn `min` dòng.
+async function idleRows(page, min = 1) {
+  const idle = (await tableMatrix(page)).flatMap((m, i) => (isProcessingRow(m) ? [] : [i]));
+  test.skip(idle.length < min, `Trang đầu chỉ có ${idle.length} dòng không ở trạng thái Processing (cần ${min})`);
+  return idle;
+}
+
+// Giao diện của 1 dòng Processing: checkbox khoá, File Name / Size hiện spinner "Processing", End Time "-", tag vàng, không icon (i),
+// cột Action chỉ có icon Download mờ (không phải link) và KHÔNG có icon Delete
+async function expectProcessingRow(row, at) {
+  await expect(rowCheckbox(row), `${at}: checkbox phải bị khoá`).toBeDisabled();
+  await expect(rowCheckbox(row), `${at}: checkbox không được tick`).not.toBeChecked();
+  for (const col of [COL.fileName, COL.size]) await expect(loadingText(row, col), `${at}: ô "${COLUMNS[col]}"`).toHaveText("Processing");
+  await expect(row.locator("td").nth(COL.endTime), `${at}: End Time`).toHaveText("-");
+  const tag = row.locator("td").nth(COL.status).locator(".ant-tag");
+  await expect(tag, `${at}: Status`).toHaveText("Processing");
+  await expect(tag, `${at}: màu tag`).toHaveClass(STATUSES.Processing.cls);
+  await expect(expireIcon(row), `${at}: icon (i) chỉ có ở Completed`).toHaveCount(0);
+  await expect(downloadLink(row), `${at}: không có link Download`).toHaveCount(0);
+  await expect(actionIcons(row), `${at}: cột Action chỉ có 1 icon (Download mờ), không có Delete`).toHaveCount(1);
+  await expect(downloadIcon(row), `${at}: icon Download phải bị làm mờ`).toHaveClass(/disabled/i);
+}
+
 // Đổi số dòng / trang
 async function setPageSize(page, label) {
   await pageSizeSelect(page).click();
@@ -365,6 +404,21 @@ async function mockWrites(page, response) {
   });
 }
 const MOCK_OK = { status: "success", messageCode: "SUCCESS", message: "OK", data: {} };
+
+// Response list GIẢ: biến các dòng (theo chỉ số trong trang; bỏ trống = tất cả) thành bản ghi đang Processing đúng dạng API thật trả
+// (status "IN PROGRESS", fileName null, fileSize "", endTime "", link null). Request list vẫn tới server thật (chỉ đọc), chỉ response bị sửa.
+// Cần gọi TRƯỚC khi nạp lại danh sách (openPage); route đăng ký sau được ưu tiên, route không xử lý thì fallback về route chặn ghi ở beforeEach.
+async function mockProcessing(page, indexes) {
+  await page.route(/boapi/, async (route) => {
+    if (!isList(route.request())) return route.fallback();
+    const res = await route.fetch();
+    const json = await res.json();
+    json.data.list = json.data.list.map((x, i) =>
+      !indexes || indexes.includes(i) ? { ...x, status: "IN PROGRESS", fileName: null, fileSize: "", endTime: "", link: null, duration: 0 } : x,
+    );
+    return route.fulfill({ response: res, json });
+  });
+}
 
 // Nạp 1 trang 100 dòng (chỉ để đọc nhiều dòng cùng lúc) -> trả về { list, totalCount }; số dòng / trang này bị app lưu nhưng beforeEach xoá ở test sau
 async function loadMany(page) {
@@ -480,7 +534,8 @@ test.describe("Download History", () => {
 
     // ===== 2. Dữ liệu bảng =====
     test.describe("Dữ liệu bảng", () => {
-      test("Mỗi dòng khớp response API (ID, Module, Section, File Name, Size, Start / End Time, Timezone, Created By, Created Time, Status)", async ({
+      // Dòng Processing: response không có fileName (null) / fileSize ("") nên bảng hiện spinner + "Processing" ở 2 ô File Name và Size
+      test("Mỗi dòng khớp response API (ID, Module, Section, File Name, Size, Start / End Time, Timezone, Created By, Created Time, Status; dòng Processing hiện 'Processing' ở File Name và Size)", async ({
         page,
       }) => {
         const { json } = await search(page);
@@ -496,8 +551,9 @@ test.describe("Download History", () => {
           expect(c[COL.id], at).toBe(String(x.downloadId));
           expect(c[COL.module], at).toBe(x.module);
           expect(c[COL.section], at).toBe(SECTION_TEXT[x.section]);
-          expect(c[COL.fileName], at).toBe(norm(x.fileName));
-          expect(c[COL.size], at).toBe(fmtSize(x.fileSize));
+          const processing = isProcessingItem(x);
+          expect(c[COL.fileName], at).toBe(processing ? "Processing" : norm(x.fileName));
+          expect(c[COL.size], at).toBe(processing ? "Processing" : fmtSize(x.fileSize));
           expect(c[COL.startTime], at).toBe(x.startTime);
           expect(c[COL.endTime], at).toBe(x.endTime || "-");
           expect(c[COL.timezone], at).toBe(norm(x.timezone));
@@ -507,12 +563,17 @@ test.describe("Download History", () => {
         }
       });
 
-      test("Định dạng: ngày giờ yyyy-MM-dd HH:mm:ss, Timezone dạng '(GMT +hh:mm) ...', Size dạng Bytes / KB / MB, Module IN HOA", async ({ page }) => {
+      test("Định dạng: ngày giờ yyyy-MM-dd HH:mm:ss, Timezone dạng '(GMT +hh:mm) ...', Size dạng Bytes / KB / MB (dòng Processing hiện 'Processing'), Module IN HOA", async ({ page }) => {
         await ensureData(page);
         for (const col of ["Start Time", "Created Time"]) for (const v of await columnValues(page, col)) expect(v, col).toMatch(DATETIME);
         for (const v of await columnValues(page, "End Time")) expect(v, "End Time").toMatch(new RegExp(`${DATETIME.source}|^-$`));
         for (const v of await columnValues(page, "Timezone")) expect(v).toMatch(/^\(GMT [+-]\d{2}:\d{2}\) \S/);
-        for (const v of await columnValues(page, "Size")) expect(v).toMatch(/^\d+(\.\d{1,2})? (Bytes|KB|MB|GB)$/);
+        // Dòng Processing chưa có file nên ô Size hiện "Processing" (kèm spinner) thay cho dung lượng
+        const statuses = await columnValues(page, "Status");
+        for (const [i, v] of (await columnValues(page, "Size")).entries()) {
+          if (statuses[i] === "Processing") expect(v, `dòng ${i + 1} (Processing)`).toBe("Processing");
+          else expect(v, `dòng ${i + 1}`).toMatch(/^\d+(\.\d{1,2})? (Bytes|KB|MB|GB)$/);
+        }
         for (const v of await columnValues(page, "Module")) expect(v).toMatch(/^[A-Z_]+$/);
         for (const v of await columnValues(page, "Created By")) expect(v).not.toBe("");
       });
@@ -537,7 +598,7 @@ test.describe("Download History", () => {
         for (const v of raw) expect(Object.values(SECTION_TEXT).filter((t) => /^[A-Z_]+$/.test(t)), `${v} hiện nguyên enum`).toContain(v);
       });
 
-      test("Trạng thái: tag đúng màu (Completed xanh, Error đỏ); chỉ Completed có icon (i) 'File expires in 7 days'", async ({ page }) => {
+      test("Trạng thái: tag đúng màu (Completed xanh, Error đỏ, Processing vàng); chỉ Completed có icon (i) 'File expires in 7 days'", async ({ page }) => {
         await ensureData(page);
         const matrix = await tableMatrix(page);
         for (const [i, m] of matrix.entries()) {
@@ -557,13 +618,22 @@ test.describe("Download History", () => {
         await expect(tooltip(page, MSG.expire)).toBeVisible();
       });
 
-      test("Cột Action: mỗi dòng có icon Delete; bản ghi Completed có link Download trỏ đúng link S3 (hết hạn 7 ngày) và tooltip 'Download'", async ({ page }) => {
+      test("Cột Action: mỗi dòng có icon Delete (trừ dòng Processing: không có Delete, Download mờ); bản ghi Completed có link Download trỏ đúng link S3 (hết hạn 7 ngày) và tooltip 'Download'", async ({
+        page,
+      }) => {
         const { json } = await search(page);
         const list = json.data.list;
         test.skip(list.length === 0, "Không có dữ liệu");
         const matrix = await tableMatrix(page);
         let checked = false;
         for (const [i, x] of list.entries()) {
+          // Bản ghi đang Processing: không có icon Delete, chỉ có icon Download bị làm mờ (không phải link)
+          if (isProcessingItem(x)) {
+            await expect(downloadLink(rowAt(page, i)), `dòng ${i + 1} (Processing): link Download`).toHaveCount(0);
+            await expect(actionIcons(rowAt(page, i)), `dòng ${i + 1} (Processing): chỉ có 1 icon, không có Delete`).toHaveCount(1);
+            await expect(downloadIcon(rowAt(page, i)), `dòng ${i + 1} (Processing): icon Download mờ`).toHaveClass(/disabled/i);
+            continue;
+          }
           await expect(deleteIcon(rowAt(page, i)), `dòng ${i + 1}: icon Delete`).toBeVisible();
           if (x.status !== "COMPLETED" || !x.link) continue;
           checked = true;
@@ -578,8 +648,8 @@ test.describe("Download History", () => {
       });
 
       test("Hover icon thùng rác của dòng hiện tooltip 'Delete'", async ({ page }) => {
-        await ensureData(page);
-        await deleteIcon(rowAt(page, 0)).hover();
+        const [i] = await idleRows(page); // dòng Processing không có icon Delete
+        await deleteIcon(rowAt(page, i)).hover();
         await expect(tooltip(page, "Delete")).toBeVisible();
       });
 
@@ -607,6 +677,75 @@ test.describe("Download History", () => {
         if (!x.fileSize) await expect(cellAt(page, 0, COL.size)).toHaveText("0 Bytes");
         if (!x.endTime) await expect(cellAt(page, 0, COL.endTime)).toHaveText("-");
         if (!x.fileName) await expect(cellAt(page, 0, COL.fileName)).toHaveText("");
+      });
+    });
+
+    // ===== 2b. Bản ghi Processing (file đang được tạo) =====
+    // Bản ghi Processing xuất hiện ngay sau khi bấm Export / Download ở màn hình khác (xem CRUD bên dưới: kiểm tra trên bản ghi thật vừa tạo) và có thể kẹt lại mãi.
+    // Nhóm này kiểm tra giao diện của dòng Processing: (1) bản ghi Processing thật đang có (lọc Status = Processing), (2) response list GIẢ để luôn kiểm tra được
+    // trường hợp trang lẫn dòng Processing và cả trang đều Processing (request list vẫn gửi thật, chỉ response bị sửa; không có request ghi nào tới server).
+    test.describe("Bản ghi Processing", () => {
+      test("Bản ghi Processing thật (lọc Status = Processing): checkbox khoá, File Name / Size hiện 'Processing', Action chỉ có icon Download mờ và không có Delete", async ({ page }) => {
+        await selectOption(page, "status", "Processing");
+        const { json } = await search(page);
+        test.skip(json.data.list.length === 0, "Không có bản ghi nào đang Processing");
+        await expect(rows(page)).toHaveCount(json.data.list.length);
+        for (const [i, x] of json.data.list.entries()) await expectProcessingRow(rowAt(page, i), `dòng ${i + 1} (download ${x.downloadId})`);
+        // Cả trang đều Processing: checkbox header khoá, không chọn được gì nên nút xoá hàng loạt không bật
+        await expect(headerCheckbox(page)).toBeDisabled();
+        await expect(enabledCheckboxes(page)).toHaveCount(0);
+        await expect(bulkDeleteBtn(page)).toBeDisabled();
+      });
+
+      test("Trang có dòng Processing (response list giả: dòng đầu IN PROGRESS): dòng đó không tick được, checkbox header chỉ chọn các dòng còn lại, hộp thoại 'Delete N files' đếm theo số dòng chọn được", async ({
+        page,
+      }) => {
+        test.skip((await rows(page).count()) < 3, "Không đủ dữ liệu");
+        await mockProcessing(page, [0]);
+        await openPage(page);
+        const n = await rows(page).count();
+        const matrix = await tableMatrix(page);
+        const processing = matrix.filter(isProcessingRow).length; // dòng giả + các dòng Processing thật (nếu có)
+        const selectable = n - processing;
+        test.skip(selectable < 2, "Cần ít nhất 2 dòng không ở trạng thái Processing");
+        expect(isProcessingRow(matrix[0]), "dòng đầu (đã giả IN PROGRESS) phải hiện Processing").toBe(true);
+        await expectProcessingRow(rowAt(page, 0), "dòng 1 (giả)");
+        await expect(enabledCheckboxes(page)).toHaveCount(selectable);
+
+        // Click vào checkbox bị khoá không tick được, không bật nút xoá hàng loạt
+        await rowCheckbox(rowAt(page, 0)).click({ force: true });
+        await expect(rowCheckbox(rowAt(page, 0))).not.toBeChecked();
+        await expect(bulkDeleteBtn(page)).toBeDisabled();
+
+        // Checkbox header chọn mọi dòng chọn được (bỏ qua dòng Processing); header hiện đã chọn khi đã chọn đủ các dòng chọn được
+        await headerCheckbox(page).check();
+        await expect(table(page).locator("tbody input[type=checkbox]:checked")).toHaveCount(selectable);
+        await expect(rowCheckbox(rowAt(page, 0))).not.toBeChecked();
+        await expect(headerCheckbox(page)).toBeChecked();
+        await expect(bulkDeleteBtn(page)).toBeEnabled();
+
+        await bulkDeleteBtn(page).click();
+        await expect(dialog(page)).toContainText(MSG.deleteN(selectable));
+        await expect(dialog(page)).toContainText(MSG.deleteNText(selectable));
+        await dlgCancel(page).click();
+        await expect(dialog(page)).toHaveCount(0);
+
+        // Bỏ chọn tất cả: dòng Processing vẫn không được tick
+        await headerCheckbox(page).uncheck();
+        await expect(table(page).locator("tbody input[type=checkbox]:checked")).toHaveCount(0);
+        await expect(bulkDeleteBtn(page)).toBeDisabled();
+      });
+
+      test("Cả trang đều Processing (response list giả): checkbox header khoá, không dòng nào có icon Delete, nút xoá hàng loạt không bật", async ({ page }) => {
+        await ensureData(page);
+        await mockProcessing(page);
+        await openPage(page);
+        const n = await rows(page).count();
+        for (let i = 0; i < n; i++) await expectProcessingRow(rowAt(page, i), `dòng ${i + 1}`);
+        await expect(headerCheckbox(page)).toBeDisabled();
+        await expect(enabledCheckboxes(page)).toHaveCount(0);
+        await expect(bulkDeleteBtn(page)).toBeDisabled();
+        for (const v of await columnValues(page, "Status")) expect(v).toBe("Processing");
       });
     });
 
@@ -1066,18 +1205,19 @@ test.describe("Download History", () => {
 
     // ===== 8. Chọn dòng + xoá hàng loạt (request ghi chỉ là GIẢ) =====
     test.describe("Chọn dòng và xoá hàng loạt (không ghi dữ liệu thật)", () => {
+      // Mọi test chọn dòng chỉ dùng dòng KHÔNG Processing (idleRows): checkbox của dòng Processing bị khoá, không tick được
       test("Chọn 1 dòng: checkbox được tick, nút xoá hàng loạt bật; bỏ chọn thì tắt lại", async ({ page }) => {
-        await ensureData(page);
-        await rowCheckbox(rowAt(page, 0)).check();
-        await expect(rowCheckbox(rowAt(page, 0))).toBeChecked();
+        const [i] = await idleRows(page);
+        await rowCheckbox(rowAt(page, i)).check();
+        await expect(rowCheckbox(rowAt(page, i))).toBeChecked();
         await expect(bulkDeleteBtn(page)).toBeEnabled();
-        await rowCheckbox(rowAt(page, 0)).uncheck();
+        await rowCheckbox(rowAt(page, i)).uncheck();
         await expect(bulkDeleteBtn(page)).toBeDisabled();
       });
 
-      test("Checkbox ở header chọn / bỏ chọn tất cả dòng của trang hiện tại", async ({ page }) => {
-        await ensureData(page);
-        const n = await rows(page).count();
+      test("Checkbox ở header chọn / bỏ chọn tất cả dòng của trang hiện tại (trừ dòng Processing có checkbox bị khoá)", async ({ page }) => {
+        await idleRows(page);
+        const n = await enabledCheckboxes(page).count(); // = số dòng không Processing
         await headerCheckbox(page).check();
         await expect(table(page).locator("tbody input[type=checkbox]:checked")).toHaveCount(n);
         await expect(bulkDeleteBtn(page)).toBeEnabled();
@@ -1086,19 +1226,18 @@ test.describe("Download History", () => {
         await expect(bulkDeleteBtn(page)).toBeDisabled();
       });
 
-      test("Tick đủ từng dòng thì checkbox header tự được tick", async ({ page }) => {
-        await ensureData(page);
-        const n = await rows(page).count();
-        for (let i = 0; i < n; i++) await rowCheckbox(rowAt(page, i)).check();
+      test("Tick đủ từng dòng (không tính dòng Processing bị khoá) thì checkbox header tự được tick", async ({ page }) => {
+        const idle = await idleRows(page);
+        for (const i of idle) await rowCheckbox(rowAt(page, i)).check();
         await expect(headerCheckbox(page)).toBeChecked();
-        await rowCheckbox(rowAt(page, 0)).uncheck();
+        await rowCheckbox(rowAt(page, idle[0])).uncheck();
         await expect(headerCheckbox(page)).not.toBeChecked();
       });
 
       test("Bulk Delete với 1 dòng: hộp thoại 'Delete downloaded file with id N' + 2 nút Cancel / Delete", async ({ page }) => {
-        await ensureData(page);
-        const id = (await columnValues(page, "ID"))[0];
-        await rowCheckbox(rowAt(page, 0)).check();
+        const [i] = await idleRows(page);
+        const id = (await columnValues(page, "ID"))[i];
+        await rowCheckbox(rowAt(page, i)).check();
         await bulkDeleteBtn(page).click();
         await expect(dialog(page)).toBeVisible();
         await expect(dialog(page)).toContainText(MSG.deleteOne(id));
@@ -1107,9 +1246,12 @@ test.describe("Download History", () => {
         await expect(dlgConfirm(page)).toBeVisible();
       });
 
-      test("Bulk Delete với nhiều dòng: hộp thoại 'Delete N files' + 'Are you sure you want to delete N files?'", async ({ page }) => {
-        test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu");
-        const n = await rows(page).count();
+      // N = số dòng CHỌN ĐƯỢC của trang (không tính dòng Processing bị khoá), không phải tổng số dòng
+      test("Bulk Delete với nhiều dòng: hộp thoại 'Delete N files' + 'Are you sure you want to delete N files?' (N = số dòng chọn được, không tính dòng Processing)", async ({
+        page,
+      }) => {
+        await idleRows(page, 2);
+        const n = await enabledCheckboxes(page).count();
         await headerCheckbox(page).check();
         await bulkDeleteBtn(page).click();
         await expect(dialog(page)).toContainText(MSG.deleteN(n));
@@ -1117,24 +1259,25 @@ test.describe("Download History", () => {
       });
 
       test("Cancel đóng hộp thoại bulk, không gửi request xoá, các dòng vẫn được chọn và danh sách không đổi", async ({ page }) => {
-        await ensureData(page);
+        const [i] = await idleRows(page);
         const before = await rows(page).allInnerTexts();
-        await rowCheckbox(rowAt(page, 0)).check();
+        await rowCheckbox(rowAt(page, i)).check();
         await bulkDeleteBtn(page).click();
         await dlgCancel(page).click();
         await expect(dialog(page)).toHaveCount(0);
-        await expect(rowCheckbox(rowAt(page, 0))).toBeChecked();
+        await expect(rowCheckbox(rowAt(page, i))).toBeChecked();
         expect(await rows(page).allInnerTexts()).toEqual(before);
       });
 
       test("Bulk Delete gửi download/delete {ids} đúng các dòng đã chọn, hiện toast Success, đóng hộp thoại, bỏ chọn và nạp lại danh sách (request GIẢ)", async ({
         page,
       }) => {
-        test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu");
+        const [a, b] = await idleRows(page, 2);
         await mockWrites(page, MOCK_OK);
-        const ids = (await columnValues(page, "ID")).slice(0, 2).map(Number);
-        await rowCheckbox(rowAt(page, 0)).check();
-        await rowCheckbox(rowAt(page, 1)).check();
+        const allIds = await columnValues(page, "ID");
+        const ids = [a, b].map((i) => Number(allIds[i]));
+        await rowCheckbox(rowAt(page, a)).check();
+        await rowCheckbox(rowAt(page, b)).check();
         await bulkDeleteBtn(page).click();
         await expect(dialog(page)).toContainText(MSG.deleteN(2));
         const [req] = await Promise.all([page.waitForRequest(isDelete), page.waitForRequest(isList), dlgConfirm(page).click()]);
@@ -1147,16 +1290,17 @@ test.describe("Download History", () => {
         await expect(table(page).locator("tbody input[type=checkbox]:checked")).toHaveCount(0);
         await expect(bulkDeleteBtn(page)).toBeDisabled();
         // Request xoá chỉ là GIẢ nên bản ghi vẫn còn sau khi nạp lại danh sách
-        expect((await columnValues(page, "ID")).slice(0, 2).map(Number)).toEqual(ids);
+        expect((await columnValues(page, "ID")).map(Number)).toEqual(expect.arrayContaining(ids));
       });
     });
 
     // ===== 9. Xoá từng dòng (request ghi chỉ là GIẢ) =====
     test.describe("Hộp thoại Delete từng dòng (không ghi dữ liệu thật)", () => {
+      // Dòng Processing không có icon Delete -> mọi test dưới đây dùng dòng không Processing (idleRows)
       test("Icon thùng rác mở hộp thoại 'Delete downloaded file with id N' với câu hỏi xác nhận và 2 nút Cancel / Delete", async ({ page }) => {
-        await ensureData(page);
-        const id = (await columnValues(page, "ID"))[0];
-        await deleteIcon(rowAt(page, 0)).click();
+        const [i] = await idleRows(page);
+        const id = (await columnValues(page, "ID"))[i];
+        await deleteIcon(rowAt(page, i)).click();
         await expect(dialog(page)).toBeVisible();
         await expect(dialog(page)).toContainText(MSG.deleteOne(id));
         await expect(dialog(page)).toContainText(MSG.deleteOneText);
@@ -1165,27 +1309,27 @@ test.describe("Download History", () => {
       });
 
       test("Hộp thoại của dòng khác hiển thị đúng ID của dòng đó", async ({ page }) => {
-        test.skip((await rows(page).count()) < 2, "Không đủ dữ liệu");
-        const id = (await columnValues(page, "ID"))[1];
-        await deleteIcon(rowAt(page, 1)).click();
+        const [, j] = await idleRows(page, 2);
+        const id = (await columnValues(page, "ID"))[j];
+        await deleteIcon(rowAt(page, j)).click();
         await expect(dialog(page)).toContainText(MSG.deleteOne(id));
       });
 
       test("Cancel đóng hộp thoại, không gửi request xoá, danh sách không đổi", async ({ page }) => {
-        await ensureData(page);
+        const [i] = await idleRows(page);
         const before = await rows(page).allInnerTexts();
-        await deleteIcon(rowAt(page, 0)).click();
+        await deleteIcon(rowAt(page, i)).click();
         await dlgCancel(page).click();
         await expect(dialog(page)).toHaveCount(0);
         expect(await rows(page).allInnerTexts()).toEqual(before);
       });
 
       test("Delete gửi download/delete {ids:[id]} của đúng dòng, hiện toast Success 'Delete succesfully', nạp lại danh sách (request GIẢ)", async ({ page }) => {
-        await ensureData(page);
+        const [i] = await idleRows(page);
         await mockWrites(page, MOCK_OK);
         const n = await rows(page).count();
-        const id = Number((await columnValues(page, "ID"))[0]);
-        await deleteIcon(rowAt(page, 0)).click();
+        const id = Number((await columnValues(page, "ID"))[i]);
+        await deleteIcon(rowAt(page, i)).click();
         const [req] = await Promise.all([page.waitForRequest(isDelete), page.waitForRequest(isList), dlgConfirm(page).click()]);
         const body = bodyOf(req);
         allowedWrites = [{ url: "download/delete", body }];
@@ -1196,16 +1340,16 @@ test.describe("Download History", () => {
         await settle(page);
         // Request xoá chỉ là GIẢ nên bản ghi vẫn còn sau khi nạp lại danh sách
         await expect(rows(page)).toHaveCount(n);
-        await expect(cellAt(page, 0, COL.id)).toHaveText(String(id));
+        await expect(rowOfId(page, id)).toHaveCount(1);
       });
 
       // Hành vi đã xác nhận (coi là đúng): response download/delete trả status "fail" thì app vẫn đóng hộp thoại và hiện toast;
       // QA không tái hiện được response lỗi thật nên test chỉ kiểm tra request đúng, hộp thoại đóng và có toast (không kiểm tra nội dung toast).
       test("Server từ chối xoá (response GIẢ fail): gửi request xoá đúng, hộp thoại đóng và có toast", async ({ page }) => {
-        await ensureData(page);
+        const [i] = await idleRows(page);
         await mockWrites(page, { status: "fail", messageCode: "FORBIDDEN", message: "Forbidden", data: {} });
-        const id = Number((await columnValues(page, "ID"))[0]);
-        await deleteIcon(rowAt(page, 0)).click();
+        const id = Number((await columnValues(page, "ID"))[i]);
+        await deleteIcon(rowAt(page, i)).click();
         const [req] = await Promise.all([page.waitForRequest(isDelete), dlgConfirm(page).click()]);
         allowedWrites = [{ url: "download/delete", body: bodyOf(req) }];
         expect(bodyOf(req)).toEqual({ ids: [id] });
@@ -1367,7 +1511,9 @@ test.describe("Download History", () => {
       await searchById(page, id);
       const row = rowOfId(page, id);
       if ((await row.count()) === 0) return false;
-      await deleteIcon(row).click();
+      // Dòng đang Processing không có icon Delete (và checkbox bị khoá) -> chờ export xong (Completed) rồi mới xoá
+      if ((await row.locator("td").nth(COL.status).innerText()).trim() === "Processing") await waitCompleted(page, id);
+      await deleteIcon(rowOfId(page, id)).click();
       await expect(dialog(page)).toContainText(MSG.deleteOne(id));
       const [req] = await Promise.all([page.waitForRequest(isDelete), dlgConfirm(page).click()]);
       expect(bodyOf(req)).toEqual({ ids: [id] });
@@ -1445,8 +1591,18 @@ test.describe("Download History", () => {
         await searchById(page, id);
         const row = rowOfId(page, id);
         await expect(row).toHaveCount(1);
+        // Ngay sau khi bấm Export, bản ghi ở trạng thái Processing (vài chục giây): checkbox khoá, File Name / Size hiện spinner,
+        // cột Action chỉ có icon Download mờ và KHÔNG có icon Delete. Nếu job đã xong trước lúc kiểm tra thì chỉ ghi chú, không fail.
+        if ((await row.locator("td").nth(COL.status).innerText()).trim() === "Processing") {
+          await expectProcessingRow(row, `download ${id} (vừa Export)`);
+        } else {
+          test.info().annotations.push({ type: "ghi chú", description: `Export ${id} đã Completed trước khi kịp kiểm tra trạng thái Processing` });
+        }
         const item = await waitCompleted(page, id);
         await expect(rowOfId(page, id)).toHaveCount(1);
+        // Hoàn tất: checkbox mở khoá, có icon Delete (được dùng ở bước xoá bên dưới)
+        await expect(rowCheckbox(rowOfId(page, id))).toBeEnabled();
+        await expect(actionIcons(rowOfId(page, id))).toHaveCount(2);
 
         const cells = (await tableMatrix(page)).find((m) => m.cells[COL.id] === String(id)).cells;
         expect(cells[COL.module]).toBe("ADMINISTRATION");
@@ -1490,6 +1646,7 @@ test.describe("Download History", () => {
         await openPage(page);
         await searchById(page, id);
         await expect(rowOfId(page, id)).toHaveCount(1);
+        await waitCompleted(page, id); // dòng Processing chưa có icon Delete
 
         await deleteIcon(rowOfId(page, id)).click();
         await dlgCancel(page).click();
@@ -1518,6 +1675,9 @@ test.describe("Download History", () => {
         await selectOption(page, "module", "Administration");
         await search(page);
         for (const id of ids) await expect(rowOfId(page, id)).toHaveCount(1);
+        // Dòng Processing có checkbox bị khoá -> chờ cả 2 file export xong (Completed) rồi mới chọn
+        for (const id of ids) await waitCompleted(page, id);
+        for (const id of ids) await expect(rowCheckbox(rowOfId(page, id))).toBeEnabled();
         for (const id of ids) await rowCheckbox(rowOfId(page, id)).check();
 
         await bulkDeleteBtn(page).click();
