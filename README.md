@@ -24,6 +24,20 @@ npm run test:ui:dashboard      // dashboard
 npm run test:ui:other          // player, download_history, user, user_menu
 npm run test:ui                // full (tất cả nhóm trên)
 // Chạy 1 file: npm run test:ui -- tests/report_alert.spec.js
+// Game client (canvas) tests/game_fortune_pig.spec.js: tự lấy URL game qua trang chủ GridPlay, chỉ cần trong .env:
+//   LOBBY_USERNAME, LOBBY_PASSWORD (tuỳ chọn LOBBY_URL) hoặc GAME_URL (URL game có sẵn ?data=..., được ưu tiên, chỉ test đúng biến thể trong URL).
+//   Thiếu cả hai -> file bị skip. Mã game thuộc về spec (GAME_VARIANTS đầu file): `npx playwright test tests/game_fortune_pig.spec.js`
+//   test CẢ HAI bản (SL_33_FORTUNE_PIGCOOL rồi SL_33_FORTUNE_PIGCOOL_MK) tuần tự, mỗi bản lấy URL riêng, dùng chung ví nên không song song.
+//   GAME_CODE=<mã[,mã]> chỉ để thu hẹp (mã sai -> fail, nêu mã hợp lệ). Game khác cần spec riêng + GAME_VARIANTS riêng, dùng lại tests/helpers/game-lobby.js.
+//   Nhóm "Quay thật" LUÔN chạy (không phụ thuộc RUN_FULL_TESTS), MẶC ĐỊNH quay 60 lượt thật
+//   (GAME_BETS=min,mid,max x GAME_SPINS=20 lượt/mức, ~25-30 phút/bản; cược tối đa ~940 TKN bản thường, ~2.040 TKN bản _mk).
+//   `npm run test:ui:game` cũng quay 60 lượt MỖI BẢN (chạy trần = cả hai bản: 120 lượt, ~50-60 phút, cược tối đa ~2.980 TKN). Chạy nhanh: GAME_CODE=<một mã> GAME_BETS=min GAME_SPINS=3.
+//   GAME_BETS=all = mọi mệnh giá x 20 lượt (rất tốn: ~180 lượt/75 phút/~2.540 TKN bản thường; ~400 lượt/2,8 giờ/~6.460 TKN bản _mk).
+//   Báo cáo chi tiết (HTML, mở bằng trình duyệt) sau mỗi lần chạy, mỗi biến thể 1 file: test-results/game-report-<MÃ GAME>.html (+ .json) và bản lưu lâu dài
+//   test-history/game-reports/<ngày_giờ>_<MÃ GAME>.html. Gồm: kết luận; giao diện (từng nút / popup đạt - lỗi - lưu ý); tổng hợp theo mức cược; đối chiếu
+//   rule (đúng / sai từng loại kiểm tra); đối chiếu lịch sử (đúng / sai từng trường); RTP thực tế so với RTP lý thuyết ở màn Info (tham khảo); độ phủ; từng lượt quay.
+//   Spec tự gia hạn phiên game (token ~20-30 phút) qua lobby; trần chi phí GAME_MAX_COST (mặc định 20000 TKN) - vượt thì dừng, không quay.
+//   Chi tiết đầu file tests/game_fortune_pig.spec.js và tests/helpers/game-lobby.js. KHÔNG ghi mật khẩu vào file nào ngoài .env.
 
 // Báo cáo test lỗi cho QA: sau mỗi lần chạy, mở test-results/failures.md
 // (gom theo loại: lỗi app đã biết / sai kết quả / timeout / mạng rớt; mỗi lỗi có mong đợi vs thực tế,
