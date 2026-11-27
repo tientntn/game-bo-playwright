@@ -13,7 +13,18 @@ const OUTPUT = process.env.FAILURES_OUTPUT || path.resolve(process.cwd(), "test-
 const MAX_STEPS = 18; // số bước gần nhất (trước chỗ lỗi) hiển thị cho mỗi test
 
 const stripAnsi = (s) => String(s || "").replace(/\u001b\[[0-9;]*m/g, "");
-const rel = (p) => path.relative(process.cwd(), p).replace(/\\/g, "/");
+
+// Che thông tin nhạy cảm trước khi ghi ra file QA đọc / có thể gửi đi: các bước tự dịch từ log (vd Fill "mật khẩu" vào ô password,
+// Truy cập URL game có ?data=<sessionToken>) và thông báo lỗi có thể chứa mật khẩu / token nguyên văn.
+const SECRET_PARAM = /([?&](?:data|token|sessionToken|access_token|accessToken|signature|password)=)[^&\s"'`)]+/gi;
+const SECRET_FIELD = /password|passwd|pwd|mật khẩu/i; // tên / selector của ô nhập bí mật
+function redact(text) {
+  let out = String(text ?? "").replace(SECRET_PARAM, "$1***");
+  const pw = String(process.env.LOBBY_PASSWORD || ""); // .env đã được playwright.config.js nạp trước khi reporter chạy
+  if (pw.length >= 4) out = out.split(pw).join("***");
+  return out;
+}
+const rel =(p) => path.relative(process.cwd(), p).replace(/\\/g, "/");
 
 // ---------------------------------------------------------------------------
 // Phân loại lỗi
@@ -191,13 +202,14 @@ function humanizeStep(step) {
   if (isNoise(t)) return null;
 
   let m;
-  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Truy cập màn hình \`${m[1]}\``;
+  if ((m = t.match(/^(?:Navigate to|page\.goto)\s+"?([^"]+)"?/i))) return `Truy cập màn hình \`${redact(m[1])}\``;
   if (/^Reload/i.test(t)) return "Tải lại trang (F5)";
   if ((m = t.match(/^Click\s+(.*)/i))) return `Bấm vào ${describeTarget(m[1]).vi}`;
   // Title có thể là: Fill "giá trị" locator(...)  |  Fill "" locator(...) (xoá)  |  Fill "giá trị" (không kèm locator)
   if ((m = t.match(/^Fill\s+"(.*?)"\s+(.*)$/i))) {
     const where = describeTarget(m[2]).vi;
-    return m[1] === "" ? `Xoá nội dung ${where}` : `Nhập dữ liệu: ${shortValue(m[1])} vào ${where}`;
+    const value = SECRET_FIELD.test(m[2]) ? '"***"' : shortValue(m[1]); // ô mật khẩu: không in giá trị
+    return m[1] === "" ? `Xoá nội dung ${where}` : `Nhập dữ liệu: ${value} vào ${where}`;
   }
   if ((m = t.match(/^Fill\s+"(.*)"\s*$/i))) return m[1] === "" ? "Xoá nội dung ô đang nhập" : `Nhập dữ liệu: ${shortValue(m[1])} vào ô đang chọn`;
   if ((m = t.match(/^Fill\s+(.*)/i))) return `Xoá nội dung ${describeTarget(m[1]).vi}`;
@@ -536,7 +548,7 @@ class FailuresReporter {
 
     try {
       fs.mkdirSync(baseDir, { recursive: true });
-      fs.writeFileSync(OUTPUT, L.join("\n"), "utf8");
+      fs.writeFileSync(OUTPUT, redact(L.join("\n")), "utf8"); // lớp bảo vệ cuối: che mật khẩu lobby / token còn sót trong thông báo lỗi
       if (this.failures.length) console.log(`\nChi tiết các test lỗi (dễ đọc cho QA): ${rel(OUTPUT)}`);
     } catch (e) {
       console.log("Không ghi được failures.md:", e.message);
